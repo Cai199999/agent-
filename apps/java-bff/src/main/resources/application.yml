@@ -1,0 +1,60 @@
+server:
+  port: ${JAVA_PORT:8200}
+
+spring:
+  application:
+    name: agent-gongdan-java-bff
+  profiles:
+    active: ${APP_ENV:dev}
+  config:
+    import: optional:file:${ENV_FILE:../../.env}[.properties]
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/agent_gongdan_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${MYSQL_USER:agent_gongdan_app}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      minimum-idle: 1
+      maximum-pool-size: 5
+      initialization-fail-timeout: -1
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+  jackson:
+    time-zone: UTC
+    date-format: yyyy-MM-dd'T'HH:mm:ss.SSSXXX
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+sa-token:
+  token-name: Authorization
+  timeout: 7200
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-prefix: Bearer
+  is-read-cookie: false
+  is-read-header: true
+  is-read-body: false
+  jwt-secret-key: ${JWT_SECRET}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO

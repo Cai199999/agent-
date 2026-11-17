@@ -1,0 +1,153 @@
+-- V8: AI 会话、消息、引用、工具调用、会话事件、分诊与会话-工单关联
+
+CREATE TABLE chat_session (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_no VARCHAR(32) NOT NULL COMMENT '会话业务号',
+    user_id BIGINT NOT NULL COMMENT '归属用户 ID',
+    title VARCHAR(200) NULL COMMENT '会话标题',
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/HANDED_OFF/CLOSED/ARCHIVED/DEGRADED',
+    ticket_id BIGINT NULL COMMENT '最近主工单 ID（仅展示，不用于追溯）',
+    message_count INT NOT NULL DEFAULT 0 COMMENT '已完成消息数',
+    last_message_at DATETIME(3) NULL COMMENT '最后一条消息时间（UTC）',
+    stream_expires_at DATETIME(3) NULL COMMENT '活动流兜底截止时间（UTC）',
+    summary TEXT NULL COMMENT '长会话摘要',
+    summary_covered_message_id BIGINT NULL COMMENT '摘要覆盖到的消息 ID',
+    version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间（UTC）',
+    updated_by BIGINT NULL COMMENT '更新人 ID',
+    deleted_at DATETIME(3) NULL COMMENT '软删除时间（UTC）',
+    deleted_by BIGINT NULL COMMENT '删除人 ID',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_chat_session_tenant_no (tenant_id, session_no),
+    KEY idx_chat_session_user_updated (user_id, updated_at),
+    KEY idx_chat_session_status_updated (status, updated_at),
+    KEY idx_chat_session_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 会话';
+
+CREATE TABLE chat_message (
+    id BIGINT NOT NULL COMMENT '主键（雪花，时间有序）',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_id BIGINT NOT NULL COMMENT '会话 ID',
+    client_message_id VARCHAR(64) NULL COMMENT '客户端消息 ID（幂等）',
+    role VARCHAR(16) NOT NULL COMMENT 'USER/ASSISTANT/SYSTEM/TOOL',
+    content MEDIUMTEXT NULL COMMENT '消息内容',
+    content_type VARCHAR(16) NOT NULL DEFAULT 'MARKDOWN' COMMENT 'TEXT/MARKDOWN',
+    status VARCHAR(16) NOT NULL DEFAULT 'COMPLETED' COMMENT 'PENDING/STREAMING/COMPLETED/FAILED',
+    trace_id VARCHAR(64) NULL COMMENT '追踪 ID',
+    token_in INT NOT NULL DEFAULT 0 COMMENT '输入 token 数',
+    token_out INT NOT NULL DEFAULT 0 COMMENT '输出 token 数',
+    latency_ms INT NULL COMMENT '生成耗时',
+    error_code VARCHAR(64) NULL COMMENT '失败错误码',
+    stream_expires_at DATETIME(3) NULL COMMENT '流截止时间（UTC）',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间（UTC）',
+    updated_by BIGINT NULL COMMENT '更新人 ID',
+    deleted_at DATETIME(3) NULL COMMENT '软删除时间（UTC）',
+    deleted_by BIGINT NULL COMMENT '删除人 ID',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_chat_message_client (tenant_id, session_id, client_message_id),
+    KEY idx_chat_message_session (session_id, id),
+    KEY idx_chat_message_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 会话消息';
+
+CREATE TABLE chat_message_citation (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    message_id BIGINT NOT NULL COMMENT '消息 ID',
+    doc_id BIGINT NOT NULL COMMENT '知识文档 ID',
+    chunk_id BIGINT NOT NULL COMMENT '知识分块 ID',
+    score DECIMAL(6,4) NULL COMMENT '检索相似度',
+    rank_no INT NOT NULL DEFAULT 0 COMMENT '引用排序',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    PRIMARY KEY (id),
+    KEY idx_chat_citation_message (message_id, rank_no),
+    KEY idx_chat_citation_doc (doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='消息知识引用';
+
+CREATE TABLE chat_tool_call (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_id BIGINT NOT NULL COMMENT '会话 ID',
+    message_id BIGINT NULL COMMENT '关联助手消息 ID',
+    tool_call_id VARCHAR(64) NOT NULL COMMENT '工具调用唯一标识',
+    tool_name VARCHAR(64) NOT NULL COMMENT '工具名称',
+    arguments_json JSON NULL COMMENT '调用参数（已脱敏）',
+    result_json JSON NULL COMMENT '返回结果（超过 4096 字节截断）',
+    result_ticket_id BIGINT NULL COMMENT '工具产生的工单 ID',
+    result_truncated TINYINT(1) NOT NULL DEFAULT 0 COMMENT '结果是否截断',
+    result_size_bytes INT NULL COMMENT '结果原始大小',
+    status VARCHAR(16) NOT NULL COMMENT 'PENDING/SUCCESS/FAILED',
+    error_code VARCHAR(64) NULL COMMENT '错误码',
+    latency_ms INT NULL COMMENT '耗时',
+    trace_id VARCHAR(64) NULL COMMENT '追踪 ID',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_chat_tool_call (tenant_id, session_id, tool_call_id),
+    KEY idx_chat_tool_call_message (message_id),
+    KEY idx_chat_tool_call_name (tool_name, created_at),
+    KEY idx_chat_tool_call_result_ticket (result_ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 工具调用轨迹';
+
+CREATE TABLE chat_event (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_id BIGINT NOT NULL COMMENT '会话 ID',
+    event_type VARCHAR(32) NOT NULL COMMENT 'CREATED/HANDOFF/CLOSED/DEGRADED 等',
+    operator_id BIGINT NULL COMMENT '操作人 ID',
+    payload_json JSON NULL COMMENT '扩展信息',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    PRIMARY KEY (id),
+    KEY idx_chat_event_session (session_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 会话事件';
+
+CREATE TABLE triage_record (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_id BIGINT NULL COMMENT '会话 ID',
+    message_id BIGINT NULL COMMENT '触发分诊的消息 ID',
+    trace_id VARCHAR(64) NULL COMMENT '追踪 ID',
+    intent_code VARCHAR(32) NOT NULL COMMENT '意图编码',
+    entities_json JSON NULL COMMENT '抽取实体',
+    confidence DECIMAL(6,4) NULL COMMENT '置信度 0-1',
+    threshold DECIMAL(6,4) NULL COMMENT '置信度阈值快照',
+    action VARCHAR(16) NOT NULL COMMENT 'ANSWER/CREATE_DRAFT/CLARIFY/HANDOFF',
+    low_confidence TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否低于阈值',
+    clarify_round INT NOT NULL DEFAULT 0 COMMENT '澄清轮次',
+    draft_json JSON NULL COMMENT '工单草稿快照',
+    draft_status VARCHAR(16) NULL COMMENT 'DRAFT/CONFIRMED/CANCELLED/EXPIRED',
+    confirmed_by BIGINT NULL COMMENT '确认建单用户',
+    confirmed_at DATETIME(3) NULL COMMENT '确认时间（UTC）',
+    model VARCHAR(100) NULL COMMENT '分诊模型',
+    prompt_version VARCHAR(32) NULL COMMENT '提示词版本',
+    latency_ms INT NULL COMMENT '分诊耗时',
+    corrected_intent_code VARCHAR(32) NULL COMMENT '人工纠正意图（P1）',
+    corrected_by BIGINT NULL COMMENT '纠正人（P1）',
+    corrected_at DATETIME(3) NULL COMMENT '纠正时间（P1）',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    PRIMARY KEY (id),
+    KEY idx_triage_session_message (session_id, message_id),
+    KEY idx_triage_intent (intent_code, created_at),
+    KEY idx_triage_low_confidence (low_confidence, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 分诊记录';
+
+CREATE TABLE chat_session_ticket (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    session_id BIGINT NOT NULL COMMENT '会话 ID',
+    ticket_id BIGINT NOT NULL COMMENT '工单 ID',
+    relation_type VARCHAR(16) NOT NULL COMMENT 'CREATED/REOPENED/LINKED',
+    created_tool_call_id VARCHAR(64) NULL COMMENT '创建该关联的工具调用 ID',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（UTC）',
+    created_by BIGINT NULL COMMENT '创建人 ID',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_chat_session_ticket (tenant_id, session_id, ticket_id),
+    KEY idx_chat_session_ticket_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会话-工单关联';
