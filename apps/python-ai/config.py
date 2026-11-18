@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     internal_token_p2j_current: str = ""
     internal_token_p2j_next: str = ""
     agent_max_steps: int = 3
+    tool_result_max_chars: int = 4000
 
     milvus_local_path: str = "./data/milvus/milvus.db"
     milvus_collection_knowledge: str = "agent_gongdan_kb_bge_m3_1024_v1"

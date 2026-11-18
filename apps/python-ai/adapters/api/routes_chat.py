@@ -35,6 +35,7 @@ def get_service() -> ChatService:
             registry,
             executor,
             settings.agent_max_steps,
+            settings.tool_result_max_chars,
         )
     return _service
 

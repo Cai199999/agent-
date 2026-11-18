@@ -31,12 +31,14 @@ SYSTEM_PROMPT = """你是「IT 运维工单智能助手」，服务于物业与 
 
 class ChatService:
     def __init__(self, llm_client, max_context_chunks: int = 8,
-                 tool_registry=None, tool_executor=None, max_steps: int = 3):
+                 tool_registry=None, tool_executor=None, max_steps: int = 3,
+                 tool_result_max_chars: int = 4000):
         self.llm_client = llm_client
         self.max_context_chunks = max_context_chunks
         self.tool_registry = tool_registry
         self.tool_executor = tool_executor
         self.max_steps = max(1, max_steps)
+        self.tool_result_max_chars = max(256, tool_result_max_chars)
 
     async def stream(self, command: ChatCommand) -> AsyncIterator[tuple[str, dict]]:
         chunks = command.context_chunks[: self.max_context_chunks]
@@ -144,7 +146,7 @@ class ChatService:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": json.dumps(tool_payload or {}, ensure_ascii=False),
+                        "content": self._tool_payload_content(tool_payload),
                     })
 
             if not completed:
@@ -167,6 +169,18 @@ class ChatService:
             "usage": {"input_tokens": token_in, "output_tokens": token_out},
             "latency_ms": int((time.perf_counter() - started) * 1000),
         }
+
+    def _tool_payload_content(self, payload: dict | None) -> str:
+        """工具结果确定性硬截断：保持合法 JSON，避免超长结果撑爆上下文。"""
+        text = json.dumps(payload or {}, ensure_ascii=False)
+        if len(text) <= self.tool_result_max_chars:
+            return text
+        return json.dumps({
+            "truncated": True,
+            "original_chars": len(text),
+            "note": f"工具结果超过 {self.tool_result_max_chars} 字符，仅保留预览",
+            "preview": text[: self.tool_result_max_chars],
+        }, ensure_ascii=False)
 
     def _build_messages(self, command: ChatCommand, chunks) -> list[dict]:
         system = SYSTEM_PROMPT + "\n\n" + self._render_context(chunks)
