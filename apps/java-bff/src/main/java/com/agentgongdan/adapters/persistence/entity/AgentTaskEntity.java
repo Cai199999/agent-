@@ -1,6 +1,8 @@
 package com.agentgongdan.adapters.persistence.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -22,9 +24,13 @@ public class AgentTaskEntity {
     private String clientTaskId;
     private String inputJson;
     private String resultJson;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String errorCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String errorMessage;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String confirmationToken;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime confirmationExpiresAt;
     private String traceId;
     private Integer latencyMs;
@@ -32,6 +38,7 @@ public class AgentTaskEntity {
     private Integer outputTokens;
     private Long costMicros;
     private String executionMode;
+    private String delegationId;
     private LocalDateTime confirmedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

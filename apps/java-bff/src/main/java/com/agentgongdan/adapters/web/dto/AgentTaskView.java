@@ -14,6 +14,7 @@ public record AgentTaskView(
         Integer outputTokens,
         Long costMicros,
         String executionMode,
+        String delegationId,
         String confirmationToken,
         String confirmationExpiresAt,
         String createdAt

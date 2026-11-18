@@ -557,7 +557,7 @@
 
 ### 4.11 子 Agent 接口（`/agent/v1`）
 
-> 用于未来大项目/Orchestrator 调用当前平台；鉴权复用内部令牌，Actor 通过 `X-Actor-Id` / `X-Actor-Roles` 传递。
+> 用于未来大项目/Orchestrator 调用当前平台；鉴权复用内部令牌，Actor 通过 `X-Actor-Id` / `X-Actor-Roles` 或短时 `X-Delegation-Token` 传递。
 
 | 方法 | 路径 | 用途 | 能力/权限 |
 |---|---|---|---|
@@ -567,12 +567,14 @@
 | GET | `/.well-known/agent-card.json`、`/agent-card.json` | A2A 风格发现端点 | 公开（不含密钥） |
 | POST | `/agent/v1/tasks` | 提交只读/写任务 | 见 Manifest 能力清单 |
 | GET | `/agent/v1/tasks/{taskId}` | 查询任务结果 | 内部令牌 + 同 Actor |
-| GET | `/agent/v1/tasks/{taskId}/events` | 任务生命周期事件 | 内部令牌 + 同 Actor |
+| GET | `/agent/v1/tasks/{taskId}/events` | 任务生命周期事件（历史） | 内部令牌 + 同 Actor |
+| GET | `/agent/v1/tasks/{taskId}/events/stream` | SSE 任务事件流（回放 + 增量 + done） | 内部令牌 + 同 Actor |
 | POST | `/agent/v1/tasks/{taskId}/confirm` | 确认写任务 | 同 Actor + `confirmationToken` |
 | POST | `/agent/v1/tasks/{taskId}/cancel` | 取消任务 | 同 Actor |
-| POST | `/agent/v1/tickets/{ticketId}/attachments?type=ONSITE\|USER\|GENERAL` | 子 Agent 上传附件/现场照片 | 内部令牌；ONSITE 需处理人 |
+| POST | `/agent/v1/tickets/{ticketId}/attachments?type=ONSITE\|USER\|GENERAL` | 子 Agent 上传附件/现场照片 | 内部令牌；ONSITE 需处理人；委托需 scope |
+| POST | `/agent/v1/delegation/token` | 签发短时委托令牌 | 内部令牌；令牌不能再次委托 |
 
-P3 已实现：`agent_task` 持久化、全部工单生命周期写能力、10 分钟一次性确认令牌、任务取消、任务事件历史、附件上传、token/成本预留字段、Agent Card 发现。异步队列/实时事件流、独立部署、完整 A2A 注册与委托鉴权待补。
+P4 已实现：`SYNC/ASYNC` 任务、`PENDING→RUNNING→SUCCEEDED/FAILED`、进程内队列端口、SSE 事件流、HMAC 委托令牌与 scope、独立 `agent` Profile（只暴露 `/agent/**`）。仍未做：持久化 MQ、进程崩溃任务恢复、真实 token/成本、完整 A2A 注册中心、物理拆服务。
 
 ---
 

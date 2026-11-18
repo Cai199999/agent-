@@ -6,6 +6,8 @@ spring:
     name: agent-gongdan-java-bff
   profiles:
     active: ${APP_ENV:dev}
+    group:
+      agent: dev
   config:
     import: optional:file:${ENV_FILE:../../.env}[.properties]
   datasource:

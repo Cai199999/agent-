@@ -3,7 +3,7 @@
 > 项目：IT 运维工单智能 Agent（agent-gongdan）
 > 日期：2026-11-18
 > 适用对象：未来大项目 / Orchestrator / 其他 Agent
-> 当前版本：P3（Manifest / Agent Card 0.4.0 + 只读/写任务 + 确认令牌 + 任务事件 + 附件上传 + 可观测字段）
+> 当前版本：P4（Manifest / Agent Card 0.5.0 + 同步/异步任务 + SSE 事件流 + 委托令牌 + 附件上传 + 独立 Agent 实例）
 
 ---
 
@@ -44,6 +44,37 @@ Content-Type: application/json
 - `X-Actor-Roles` 用逗号分隔；
 - 当前平台仍会做票级权限和数据范围校验，不能因为“内部调用”越权。
 
+### 委托令牌（P4）
+
+`X-Internal-Token` 只代表“内部调用方”。如果编排器代表最终用户调用，建议签发短时委托令牌：
+
+```http
+POST /agent/v1/delegation/token
+Content-Type: application/json
+
+{
+  "actorId": 10003,
+  "roles": ["REPORTER"],
+  "scopes": ["ticket.query", "ticket.create"],
+  "ttlSeconds": 600
+}
+```
+
+后续请求携带：
+
+```http
+X-Internal-Token: <内部令牌>
+X-Delegation-Token: <委托令牌>
+```
+
+存在委托令牌时：
+
+- Actor / 角色 / scope 以令牌声明为准，`X-Actor-Id` / `X-Actor-Roles` 被忽略；
+- `scopes` 支持 `*` 或能力名 / `ticket.attachment.upload`；
+- 令牌默认 10 分钟，最长 1 小时；
+- 已有委托令牌不能再次签发委托令牌；
+- 非委托调用仍兼容原有 `X-Actor-*` 头。
+
 ---
 
 ## 3. Agent Manifest
@@ -58,12 +89,15 @@ GET /agent/v1/manifest
 {
   "agentId": "property-maintenance",
   "name": "物业报修与工单 Agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "protocol": "agent-task-v1",
   "taskEndpoint": "/agent/v1/tasks",
+  "eventStreamEndpoint": "/agent/v1/tasks/{taskId}/events/stream",
+  "executionModes": ["SYNC", "ASYNC"],
   "auth": {
     "type": "internal-token",
-    "header": "X-Internal-Token"
+    "header": "X-Internal-Token",
+    "delegationHeader": "X-Delegation-Token"
   },
   "capabilities": [
     {
@@ -98,7 +132,8 @@ POST /agent/v1/tasks
     "limit": 5
   },
   "contextRefs": {},
-  "clientTaskId": "orchestrator-20261118-001"
+  "clientTaskId": "orchestrator-20261118-001",
+  "executionMode": "SYNC"
 }
 ```
 
@@ -121,6 +156,7 @@ POST /agent/v1/tasks
     "outputTokens": null,
     "costMicros": null,
     "executionMode": "SYNC",
+    "delegationId": null,
     "createdAt": "2026-11-18T08:00:00Z"
   }
 }
@@ -130,13 +166,29 @@ POST /agent/v1/tasks
 
 ---
 
-## 5. 查询任务
+## 5. 查询任务与异步模式
 
 ```http
 GET /agent/v1/tasks/{taskId}
 ```
 
-只能查询同一 `X-Actor-Id` 创建的任务。
+只能查询同一 Actor（或委托令牌声明的 Actor）创建的任务。
+
+`executionMode`：
+
+| 值 | 行为 |
+|---|---|
+| `SYNC`（默认） | 请求内执行，直接返回 `SUCCEEDED` / `FAILED` |
+| `ASYNC` | 只读任务返回 `PENDING`；写任务先 `WAITING_CONFIRM`，确认后返回 `PENDING`，由 Worker 执行 |
+
+异步状态机：
+
+```text
+PENDING → RUNNING → SUCCEEDED / FAILED
+PENDING / RUNNING / WAITING_CONFIRM → CANCELLED
+```
+
+调用方应轮询任务或订阅 SSE，直到终态。
 
 ---
 
@@ -226,7 +278,7 @@ POST /agent/v1/tasks/{taskId}/cancel
 
 ---
 
-## 9. 任务事件（P3）
+## 9. 任务事件与 SSE（P3/P4）
 
 ```http
 GET /agent/v1/tasks/{taskId}/events
@@ -238,17 +290,37 @@ GET /agent/v1/tasks/{taskId}/events
 {
   "code": 0,
   "data": [
-    {"status": "WAITING_CONFIRM", "detail": "等待人工确认", "createdAt": "..."},
-    {"status": "SUCCEEDED", "detail": "执行成功", "createdAt": "..."}
+    {"id": "...", "status": "PENDING", "message": null, "createdAt": "..."},
+    {"id": "...", "status": "RUNNING", "message": null, "createdAt": "..."},
+    {"id": "...", "status": "SUCCEEDED", "message": null, "createdAt": "..."}
   ]
 }
 ```
 
+实时订阅：
+
+```http
+GET /agent/v1/tasks/{taskId}/events/stream
+Accept: text/event-stream
+```
+
+事件格式：
+
+```text
+id:<eventId>
+event:task-event
+data:{"id":"...","taskId":"...","status":"RUNNING","message":null,"createdAt":"..."}
+
+event:done
+data:{"taskId":"...","status":"SUCCEEDED"}
+```
+
 说明：
 
-- 仅同 Actor 可查询；
-- 当前为**落库事件历史查询**，不是 SSE / WebSocket 实时推送；
-- 状态包含 `WAITING_CONFIRM` / `SUCCEEDED` / `FAILED` / `CANCELLED` 等。
+- 先回放历史事件，再增量推送；终态发送 `done` 并关闭；
+- 默认 1s 轮询事件表、15s 心跳、10 分钟超时，均可配置；
+- 仅同 Actor 可订阅；
+- 当前为数据库轮询实现，多实例可共享，但尚未接入推送网关。
 
 ---
 
@@ -271,9 +343,11 @@ file=@onsite.png
 
 返回附件 ID、类型、预签名 URL。上传成功后再提交 `ticket.resolve`。
 
+使用委托令牌时，scope 需包含 `*` 或 `ticket.attachment.upload`。
+
 ---
 
-## 11. Agent Card 发现（P3）
+## 11. Agent Card 发现（P3/P4）
 
 ```http
 GET /.well-known/agent-card.json
@@ -282,22 +356,39 @@ GET /agent/v1/card
 ```
 
 返回 Agent 名称、描述、版本、协议版本、skills、securitySchemes 等发现信息。
-当前为 A2A 风格的最小发现端点，未实现完整 A2A 注册中心与委托鉴权。
+P4 起 `capabilities.streaming=true`，输出模式包含 `text/event-stream`。
+当前仍为 A2A 风格的最小发现端点，未实现完整 A2A 注册中心。
 
 ---
 
-## 12. 调用方注意事项
+## 12. 独立 Agent 实例部署
+
+同一构建产物支持 `agent` Profile：
+
+```bash
+java -jar agent-gongdan-java-bff.jar --spring.profiles.active=agent
+```
+
+- 默认端口 `8400`（`AGENT_SERVICE_PORT` 可覆盖）；
+- 只暴露 `/agent/**`、`/.well-known/agent-card.json`、`/actuator/health`；
+- 其他用户端 API 返回 404；
+- 与 BFF 共用数据库/MySQL/Redis/MinIO，属于独立运行实例，不是独立微服务；
+- 启动前仍需按项目端口登记表复核端口空闲。
+
+---
+
+## 13. 调用方注意事项
 
 1. 不要传全量聊天历史，只传任务 brief 与必要引用；
 2. 不要传原始内部 Token 给最终用户；
 3. 高风险能力必须展示人工确认；
-4. 不要依赖任务内存状态：P0 重启会丢失，P1 落库；
+4. 任务已落 `agent_task` 表，重启不丢失；异步任务当前不做进程崩溃自动恢复；
 5. 不要直接调用平台内部 Controller；
 6. 失败重试必须使用相同 `clientTaskId`。
 
 ---
 
-## 13. 示例
+## 14. 示例
 
 ```bash
 curl -X POST http://127.0.0.1:8200/agent/v1/tasks \
@@ -313,14 +404,14 @@ curl -X POST http://127.0.0.1:8200/agent/v1/tasks \
 
 ---
 
-## 14. 当前限制
+## 15. 当前限制
 
-- 无异步任务队列 / Worker；任务在请求内同步执行；
-- 任务事件为落库历史查询，暂无 SSE / WebSocket 实时推送；
+- 异步队列是进程内线程池，不是持久化 MQ；进程崩溃时 `PENDING/RUNNING` 任务不会自动恢复；
+- SSE 通过数据库轮询实现，默认 1s 间隔，不是推送网关；
 - `inputTokens` / `outputTokens` / `costMicros` 字段已预留，当前任务执行不产生真实 LLM 计量；
-- 未独立部署，仍与 Java BFF 同进程；
-- 未实现完整 A2A 协议注册中心与委托鉴权，仅提供 Agent Card 发现端点；
-- 未提供 SDK，直接 HTTP 调用；
-- 浏览器 E2E 未覆盖附件上传 + 解决全链路。
+- 委托令牌是内部信任模型下的 HMAC 短令牌，不是 OAuth2/OIDC 委托链；
+- 独立 `agent` Profile 仍与 BFF 共用同一构建产物和数据库，未物理拆服务；
+- 未实现完整 A2A 注册中心、任务推送回调与跨实例事件总线；
+- 未提供 SDK，直接 HTTP 调用。
 
 后续按 `07-子Agent服务化改造方案与阶段目标.md` 的 Stage 2–5 演进。

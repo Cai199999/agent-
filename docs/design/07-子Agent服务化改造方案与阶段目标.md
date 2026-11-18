@@ -270,6 +270,8 @@ Task 请求只允许：
 - 可统计成功率、P95、成本；
 - 失败可重试/取消。
 
+> P4 状态：异步任务、SSE 事件、耗时/状态追踪、取消已落地；token/成本字段已预留但未接真实计量，持久化 MQ 与崩溃恢复未完成。
+
 ---
 
 ### Stage 5：契约测试与可选拆分
@@ -483,6 +485,59 @@ apps/python-ai/.venv/bin/python scripts/e2e/agent_p3_smoke.py
 - 未独立部署，仍与 BFF 同进程；
 - 未实现完整 A2A 协议注册/发现中心与委托鉴权，仅提供 Agent Card 形状的发现端点；
 - 浏览器 E2E 未覆盖“附件上传 → 解决”全链路。
+
+### 9.8 P4 实现记录（2026-11-18）
+
+目标：把子 Agent 从“同步接口”推进到“可异步、可订阅、可委托、可独立运行”的服务形态。
+
+已完成：
+
+- Manifest / Agent Card 升级至 `0.5.0`；
+- 异步任务：
+  - `AgentTaskRequest.executionMode` 支持 `SYNC` / `ASYNC`；
+  - 新增 `AgentTaskQueuePort` + `AgentTaskJobHandler`；
+  - 新增进程内适配器 `LocalAgentTaskQueue`（`agentTaskExecutor` 线程池）；
+  - 新增 `AgentTaskWorker`：`PENDING → RUNNING → SUCCEEDED/FAILED`，原子领取 + 条件落终态；
+  - 确认后的写任务也可异步执行；
+  - 队列/线程池参数外置，未来替换 Redis Stream / MQ 只需换端口适配器。
+- SSE 任务事件流：
+  - `GET /agent/v1/tasks/{taskId}/events/stream`；
+  - 先回放历史事件，再增量推送；终态发送 `done` 并关闭；
+  - 15s 心跳、可配置超时；
+  - 新增 `AgentTaskEventStreamPort`，适配器 `DbPollingAgentTaskEventStreamAdapter` 以事件表轮询实现，多实例可共享；
+  - 保留 `GET /tasks/{id}/events` 历史查询兼容。
+- 委托鉴权：
+  - `POST /agent/v1/delegation/token` 签发短时 HMAC 令牌；
+  - Header `X-Delegation-Token`；
+  - Actor / 角色 / scope 由令牌声明，存在委托令牌时忽略可伪造的 `X-Actor-*`；
+  - `taskType` 与附件上传都校验 scope；
+  - 委托令牌不能再次委托，避免权限扩散；
+  - `V18__add_agent_task_delegation.sql` 记录 `delegation_id` 便于审计。
+- 独立部署形态：
+  - 新增 `agent` Spring Profile + `AgentStandaloneModeFilter`；
+  - 独立实例只暴露 `/agent/**`、Agent Card、`/actuator/health`，用户端 API 返回 404；
+  - 使用 `--spring.profiles.active=agent`、`AGENT_SERVICE_PORT` 启动；
+  - 仍复用同一构建产物与数据库，属于“独立运行实例”，尚未拆成独立微服务仓库。
+- 浏览器 E2E：
+  - 新增 `ticket-lifecycle.spec.ts`：建单 → 派单 → 接单 → 上传现场照片 → 解决 → 待验证。
+
+验证：
+
+```bash
+apps/python-ai/.venv/bin/python scripts/e2e/agent_p4_smoke.py
+# 19 checks：异步只读/写、SSE 回放+增量、委托 scope、Actor 绑定、确认令牌清理
+cd apps/web && npm run e2e
+# 5 checks：认证、对话、个人中心、建单、完整生命周期
+```
+
+**P4 仍保留的边界：**
+
+- 队列是进程内线程池，不是持久化 MQ；进程崩溃时 `PENDING/RUNNING` 任务不会自动恢复；
+- SSE 通过数据库轮询实现，默认 1s 间隔，不是推送网关；
+- token / cost 字段仍为预留，未接真实 LLM 计量；
+- 委托令牌是内部信任模型下的 HMAC 短令牌，不是 OAuth2/OIDC 委托链；
+- 独立实例仍复用同一 jar 和数据库，未完成物理拆库/拆服务；
+- 未实现完整 A2A 注册中心、任务推送回调与跨实例事件总线。
 
 ---
 

@@ -1,17 +1,12 @@
 package com.agentgongdan.app.service;
 
 import com.agentgongdan.adapters.persistence.entity.AgentTaskEntity;
-import com.agentgongdan.adapters.persistence.entity.AgentTaskEventEntity;
-import com.agentgongdan.adapters.persistence.mapper.AgentTaskEventMapper;
 import com.agentgongdan.adapters.persistence.mapper.AgentTaskMapper;
-import com.agentgongdan.adapters.web.dto.AddTicketMaterialRequest;
-import com.agentgongdan.adapters.web.dto.AddTicketVisitRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskEventView;
 import com.agentgongdan.adapters.web.dto.AgentTaskRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskView;
-import com.agentgongdan.adapters.web.dto.CreateTicketRequest;
-import com.agentgongdan.adapters.web.dto.KnowledgeSearchRequest;
-import com.agentgongdan.adapters.web.dto.TransitionRequest;
+import com.agentgongdan.app.dto.AgentTaskEvent;
+import com.agentgongdan.app.ports.agent.AgentTaskQueuePort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -22,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -31,8 +25,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 子 Agent Task API。
- * P0：只读能力 + 内存任务；P1：agent_task 持久化 + 写能力确认。
+ * 子 Agent Task API 应用服务。
+ * 职责边界：幂等、确认、状态机、事件与队列调度；
+ * 能力执行在 AgentTaskWorker，具体业务在平台既有用例，不在此层直连数据库以外的适配器。
  */
 @Service
 public class AgentTaskService {
@@ -40,37 +35,24 @@ public class AgentTaskService {
     private static final String AGENT_ID = "property-maintenance";
     private static final long TENANT = 0L;
     private static final long CONFIRM_TTL_MINUTES = 10;
+    private static final String MODE_SYNC = "SYNC";
+    private static final String MODE_ASYNC = "ASYNC";
 
-    private final TicketService ticketService;
-    private final KnowledgeService knowledgeService;
-    private final TicketVectorService ticketVectorService;
-    private final TicketExportJobService ticketExportJobService;
-    private final TicketAccessService ticketAccessService;
-    private final TicketMaterialService ticketMaterialService;
-    private final TicketVisitService ticketVisitService;
     private final AgentTaskMapper taskMapper;
-    private final AgentTaskEventMapper eventMapper;
+    private final AgentTaskEventService eventService;
+    private final AgentTaskWorker taskWorker;
+    private final AgentTaskQueuePort taskQueue;
     private final ObjectMapper objectMapper;
 
-    public AgentTaskService(TicketService ticketService,
-                            KnowledgeService knowledgeService,
-                            TicketVectorService ticketVectorService,
-                            TicketExportJobService ticketExportJobService,
-                            TicketAccessService ticketAccessService,
-                            TicketMaterialService ticketMaterialService,
-                            TicketVisitService ticketVisitService,
-                            AgentTaskMapper taskMapper,
-                            AgentTaskEventMapper eventMapper,
+    public AgentTaskService(AgentTaskMapper taskMapper,
+                            AgentTaskEventService eventService,
+                            AgentTaskWorker taskWorker,
+                            AgentTaskQueuePort taskQueue,
                             ObjectMapper objectMapper) {
-        this.ticketService = ticketService;
-        this.knowledgeService = knowledgeService;
-        this.ticketVectorService = ticketVectorService;
-        this.ticketExportJobService = ticketExportJobService;
-        this.ticketAccessService = ticketAccessService;
-        this.ticketMaterialService = ticketMaterialService;
-        this.ticketVisitService = ticketVisitService;
         this.taskMapper = taskMapper;
-        this.eventMapper = eventMapper;
+        this.eventService = eventService;
+        this.taskWorker = taskWorker;
+        this.taskQueue = taskQueue;
         this.objectMapper = objectMapper;
     }
 
@@ -78,10 +60,15 @@ public class AgentTaskService {
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("agentId", AGENT_ID);
         manifest.put("name", "物业报修与工单 Agent");
-        manifest.put("version", "0.4.0");
+        manifest.put("version", "0.5.0");
         manifest.put("protocol", "agent-task-v1");
         manifest.put("taskEndpoint", "/agent/v1/tasks");
-        manifest.put("auth", Map.of("type", "internal-token", "header", "X-Internal-Token"));
+        manifest.put("eventStreamEndpoint", "/agent/v1/tasks/{taskId}/events/stream");
+        manifest.put("executionModes", List.of(MODE_SYNC, MODE_ASYNC));
+        manifest.put("auth", Map.of(
+                "type", "internal-token",
+                "header", "X-Internal-Token",
+                "delegationHeader", "X-Delegation-Token"));
         manifest.put("capabilities", List.of(
                 capability("ticket.query", "查询当前 Actor 可见工单", "ticket:read", false, "READ_ONLY"),
                 capability("ticket.detail", "按工单 ID 或工单号查询详情", "ticket:read", false, "READ_ONLY"),
@@ -110,57 +97,59 @@ public class AgentTaskService {
         card.put("name", "Property Maintenance Agent");
         card.put("description", "物业报修、工单流转、现场处理、知识检索与导出子 Agent");
         card.put("url", "http://127.0.0.1:8200/agent/v1");
-        card.put("version", "0.4.0");
+        card.put("version", "0.5.0");
         card.put("protocolVersion", "agent-task-v1");
         card.put("capabilities", Map.of(
-                "streaming", false,
+                "streaming", true,
                 "pushNotifications", false,
                 "stateTransitionHistory", true
         ));
         card.put("defaultInputModes", List.of("application/json"));
-        card.put("defaultOutputModes", List.of("application/json"));
+        card.put("defaultOutputModes", List.of("application/json", "text/event-stream"));
         card.put("skills", manifest().get("capabilities"));
         card.put("securitySchemes", Map.of(
-                "internalToken", Map.of("type", "apiKey", "in", "header", "name", "X-Internal-Token")
+                "internalToken", Map.of("type", "apiKey", "in", "header", "name", "X-Internal-Token"),
+                "delegationToken", Map.of("type", "apiKey", "in", "header", "name", "X-Delegation-Token")
         ));
         return card;
     }
 
-    public AgentTaskView submit(AgentTaskRequest request, long actorId,
-                                List<String> roles, String traceId) {
+    public AgentTaskView submit(AgentTaskRequest request, long actorId, List<String> roles,
+                                List<String> delegationScopes, String delegationId, String traceId) {
         if (request == null || !StringUtils.hasText(request.taskType())) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "taskType 不能为空");
         }
+        String capability = request.taskType().trim();
+        requireScope(capability, delegationScopes);
+
         String clientTaskId = StringUtils.hasText(request.clientTaskId())
                 ? request.clientTaskId().trim() : null;
         if (clientTaskId != null) {
-            AgentTaskEntity existing = taskMapper.selectOne(Wrappers.<AgentTaskEntity>lambdaQuery()
-                    .eq(AgentTaskEntity::getTenantId, TENANT)
-                    .eq(AgentTaskEntity::getActorId, actorId)
-                    .eq(AgentTaskEntity::getClientTaskId, clientTaskId)
-                    .last("LIMIT 1"));
+            AgentTaskEntity existing = findExisting(actorId, clientTaskId);
             if (existing != null) {
                 return toView(existing);
             }
         }
 
+        String executionMode = normalizeMode(request.executionMode());
         String taskId = UUID.randomUUID().toString();
         AgentTaskEntity entity = new AgentTaskEntity();
         entity.setId(IdWorker.getId());
         entity.setTenantId(TENANT);
         entity.setTaskId(taskId);
         entity.setAgentId(AGENT_ID);
-        entity.setCapability(request.taskType());
+        entity.setCapability(capability);
         entity.setActorId(actorId);
         entity.setActorRoles(String.join(",", roles == null ? List.of() : roles));
         entity.setClientTaskId(clientTaskId);
+        entity.setDelegationId(delegationId);
         entity.setInputJson(toJson(request.input() == null ? Map.of() : request.input()));
         entity.setTraceId(traceId);
-        entity.setExecutionMode("SYNC");
+        entity.setExecutionMode(executionMode);
         entity.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         entity.setUpdatedAt(entity.getCreatedAt());
 
-        boolean requiresConfirm = isWriteCapability(request.taskType());
+        boolean requiresConfirm = isWriteCapability(capability);
         if (requiresConfirm) {
             entity.setStatus("WAITING_CONFIRM");
             entity.setConfirmationToken(UUID.randomUUID().toString().replace("-", ""));
@@ -168,81 +157,78 @@ public class AgentTaskService {
                     .plusMinutes(CONFIRM_TTL_MINUTES));
             entity.setResultJson(toJson(Map.of(
                     "summary", "该能力需要人工确认后才会执行",
-                    "capability", request.taskType())));
+                    "capability", capability)));
+        } else if (MODE_ASYNC.equals(executionMode)) {
+            entity.setStatus("PENDING");
+            entity.setResultJson(toJson(Map.of(
+                    "summary", "任务已进入队列",
+                    "capability", capability)));
         } else {
-            applyExecution(entity, roles);
+            taskWorker.executeInline(entity, roles);
         }
+
         try {
             taskMapper.insert(entity);
         } catch (DuplicateKeyException e) {
-            AgentTaskEntity existing = taskMapper.selectOne(Wrappers.<AgentTaskEntity>lambdaQuery()
-                    .eq(AgentTaskEntity::getTenantId, TENANT)
-                    .eq(AgentTaskEntity::getActorId, actorId)
-                    .eq(AgentTaskEntity::getClientTaskId, clientTaskId)
-                    .last("LIMIT 1"));
+            AgentTaskEntity existing = findExisting(actorId, clientTaskId);
             if (existing != null) {
                 return toView(existing);
             }
             throw e;
         }
-        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
+        eventService.record(taskId, entity.getStatus(), entity.getErrorMessage());
+
+        if (!requiresConfirm && MODE_ASYNC.equals(executionMode)) {
+            enqueue(taskId, entity);
+        }
         return toView(entity);
     }
 
     public AgentTaskView get(String taskId, long actorId) {
         AgentTaskEntity entity = find(taskId);
-        if (!entity.getActorId().equals(actorId)) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权访问该任务");
-        }
+        requireOwner(entity, actorId, "无权访问该任务");
         return toView(entity);
     }
 
     public AgentTaskView cancel(String taskId, long actorId) {
         AgentTaskEntity entity = find(taskId);
-        if (!entity.getActorId().equals(actorId)) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权取消该任务");
-        }
+        requireOwner(entity, actorId, "无权取消该任务");
         if (!List.of("PENDING", "RUNNING", "WAITING_CONFIRM").contains(entity.getStatus())) {
             throw new ApiException(ErrorCode.TICKET_STATE_CONFLICT, "当前任务不可取消");
         }
-        entity.setStatus("CANCELLED");
-        entity.setErrorCode(null);
-        entity.setErrorMessage("调用方已取消");
-        entity.setConfirmationToken(null);
-        entity.setConfirmationExpiresAt(null);
-        entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
-        taskMapper.updateById(entity);
-        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
-        return toView(entity);
+        int updated = taskMapper.update(null, Wrappers.<AgentTaskEntity>lambdaUpdate()
+                .eq(AgentTaskEntity::getTenantId, TENANT)
+                .eq(AgentTaskEntity::getTaskId, taskId)
+                .in(AgentTaskEntity::getStatus, List.of("PENDING", "RUNNING", "WAITING_CONFIRM"))
+                .set(AgentTaskEntity::getStatus, "CANCELLED")
+                .set(AgentTaskEntity::getErrorCode, null)
+                .set(AgentTaskEntity::getErrorMessage, "调用方已取消")
+                .set(AgentTaskEntity::getConfirmationToken, null)
+                .set(AgentTaskEntity::getConfirmationExpiresAt, null)
+                .set(AgentTaskEntity::getUpdatedAt, LocalDateTime.now(ZoneOffset.UTC)));
+        if (updated == 0) {
+            throw new ApiException(ErrorCode.TICKET_STATE_CONFLICT, "当前任务不可取消");
+        }
+        eventService.record(taskId, "CANCELLED", "调用方已取消");
+        return toView(find(taskId));
     }
 
     public List<AgentTaskEventView> events(String taskId, long actorId) {
-        AgentTaskEntity task = find(taskId);
-        if (!task.getActorId().equals(actorId)) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权访问该任务");
-        }
-        return eventMapper.selectList(Wrappers.<AgentTaskEventEntity>lambdaQuery()
-                        .eq(AgentTaskEventEntity::getTenantId, TENANT)
-                        .eq(AgentTaskEventEntity::getTaskId, taskId)
-                        .orderByAsc(AgentTaskEventEntity::getId))
-                .stream()
-                .map(item -> new AgentTaskEventView(
-                        String.valueOf(item.getId()),
-                        item.getTaskId(),
-                        item.getStatus(),
-                        item.getMessage(),
-                        item.getCreatedAt() == null ? null
-                                : item.getCreatedAt().atOffset(ZoneOffset.UTC)
-                                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)))
+        return eventsAfter(taskId, actorId, null).stream()
+                .map(this::toEventView)
                 .toList();
+    }
+
+    public List<AgentTaskEvent> eventsAfter(String taskId, long actorId, String afterEventId) {
+        AgentTaskEntity task = find(taskId);
+        requireOwner(task, actorId, "无权访问该任务");
+        return eventService.listAfter(taskId, afterEventId);
     }
 
     public AgentTaskView confirm(String taskId, String confirmationToken,
                                  long actorId, List<String> roles) {
         AgentTaskEntity entity = find(taskId);
-        if (!entity.getActorId().equals(actorId)) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权确认该任务");
-        }
+        requireOwner(entity, actorId, "无权确认该任务");
         if (!"WAITING_CONFIRM".equals(entity.getStatus())) {
             throw new ApiException(ErrorCode.TICKET_STATE_CONFLICT, "该任务不需要确认");
         }
@@ -256,208 +242,67 @@ public class AgentTaskService {
             entity.setErrorCode(String.valueOf(ErrorCode.AUTH_TOKEN_EXPIRED.getCode()));
             entity.setErrorMessage("确认已过期");
             entity.setConfirmationToken(null);
+            entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
             taskMapper.updateById(entity);
+            eventService.record(taskId, "FAILED", "确认已过期");
             throw new ApiException(ErrorCode.AUTH_TOKEN_EXPIRED, "确认已过期");
         }
-        applyExecution(entity, roles);
+
         entity.setConfirmedAt(LocalDateTime.now(ZoneOffset.UTC));
         entity.setConfirmationToken(null);
         entity.setConfirmationExpiresAt(null);
+        if (MODE_ASYNC.equals(entity.getExecutionMode())) {
+            entity.setStatus("PENDING");
+            entity.setResultJson(toJson(Map.of(
+                    "summary", "已确认，任务进入队列",
+                    "capability", entity.getCapability())));
+            entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+            taskMapper.updateById(entity);
+            eventService.record(taskId, "PENDING", "已确认，任务进入队列");
+            enqueue(taskId, entity);
+            return toView(entity);
+        }
+
+        taskWorker.executeInline(entity, roles);
+        entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         taskMapper.updateById(entity);
-        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
+        eventService.record(taskId, entity.getStatus(), entity.getErrorMessage());
         return toView(entity);
     }
 
-    private void applyExecution(AgentTaskEntity entity, List<String> roles) {
-        long started = System.currentTimeMillis();
+    private void enqueue(String taskId, AgentTaskEntity entity) {
         try {
-            Object result = dispatch(entity.getCapability(), fromJson(entity.getInputJson()),
-                    entity.getActorId(), roles, entity.getTaskId());
-            entity.setStatus("SUCCEEDED");
-            entity.setResultJson(toJson(result));
-            entity.setErrorCode(null);
-            entity.setErrorMessage(null);
+            taskQueue.enqueue(taskId);
+        } catch (RuntimeException ex) {
+            entity.setStatus("FAILED");
+            entity.setErrorCode(String.valueOf(ErrorCode.SYS_DEPENDENCY_UNAVAILABLE.getCode()));
+            entity.setErrorMessage("任务队列不可用");
+            entity.setResultJson(toJson(Map.of(
+                    "summary", "任务队列不可用",
+                    "capability", entity.getCapability())));
             entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
-        } catch (ApiException ex) {
-            entity.setStatus("FAILED");
-            entity.setErrorCode(String.valueOf(ex.getErrorCode().getCode()));
-            entity.setErrorMessage(ex.getMessage());
-        } catch (Exception ex) {
-            entity.setStatus("FAILED");
-            entity.setErrorCode(String.valueOf(ErrorCode.SYS_INTERNAL_ERROR.getCode()));
-            entity.setErrorMessage(ErrorCode.SYS_INTERNAL_ERROR.getMessage());
+            taskMapper.update(null, Wrappers.<AgentTaskEntity>lambdaUpdate()
+                    .eq(AgentTaskEntity::getTenantId, TENANT)
+                    .eq(AgentTaskEntity::getTaskId, taskId)
+                    .eq(AgentTaskEntity::getStatus, "PENDING")
+                    .set(AgentTaskEntity::getStatus, "FAILED")
+                    .set(AgentTaskEntity::getResultJson, entity.getResultJson())
+                    .set(AgentTaskEntity::getErrorCode, entity.getErrorCode())
+                    .set(AgentTaskEntity::getErrorMessage, entity.getErrorMessage())
+                    .set(AgentTaskEntity::getUpdatedAt, entity.getUpdatedAt()));
+            eventService.record(taskId, "FAILED", entity.getErrorMessage());
         }
-        entity.setLatencyMs((int) (System.currentTimeMillis() - started));
     }
 
-    private Object dispatch(String capability, Map<String, Object> input,
-                            long actorId, List<String> roles, String taskId) {
-        Map<String, Object> args = input == null ? Map.of() : input;
-        return switch (capability) {
-            case "ticket.query" -> ticketService.listInternal(
-                    actorId, roles, str(args.get("status")), str(args.get("keyword")),
-                    intValue(args.get("limit"), 5, 1, 20));
-            case "ticket.detail" -> {
-                String ref = firstText(str(args.get("ticketId")), str(args.get("ticketNo")));
-                yield ticketService.detailInternalRef(ref, actorId, roles);
-            }
-            case "ticket.similar" -> ticketVectorService.similarByQuery(
-                    required(args, "query"), intValue(args.get("topK"), 5, 1, 20));
-            case "knowledge.search" -> knowledgeService.search(new KnowledgeSearchRequest(
-                    required(args, "query"), intValue(args.get("topK"), 5, 1, 20),
-                    str(args.get("categoryCode"))));
-            case "ticket.create" -> {
-                requireCreateRole(roles);
-                yield ticketService.create(buildCreateRequest(args), actorId, "agent-task:" + taskId);
-            }
-            case "ticket.export" -> {
-                if (roles == null || roles.isEmpty()) {
-                    throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "没有导出权限");
-                }
-                boolean privileged = roles.contains("ADMIN") || roles.contains("DISPATCHER")
-                        || roles.contains("ENGINEER") || roles.contains("INSPECTOR");
-                yield ticketExportJobService.export(
-                        str(args.get("status")), str(args.get("keyword")),
-                        str(args.get("priorityCode")), str(args.get("ticketTypeCode")),
-                        str(args.get("location")), null,
-                        privileged ? null : actorId,
-                        parseTime(args.get("startTime")), parseTime(args.get("endTime")));
-            }
-            case "ticket.assign" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireManager(roles);
-                Long assigneeId = longValue(args.get("assigneeId"));
-                if (assigneeId == null) {
-                    throw new ApiException(ErrorCode.VALIDATION_ERROR, "缺少参数: assigneeId");
-                }
-                yield ticketService.transition(ticketId, "assign",
-                        transition(ticket.getVersion(), assigneeId, null, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.accept" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireHandlerOrUnassigned(ticketId, actorId, roles);
-                yield ticketService.transition(ticketId, "accept",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.resolve" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireHandler(ticketId, actorId, roles);
-                String serviceItemText = required(args, "serviceItemText");
-                yield ticketService.transition(ticketId, "resolve",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, null, str(args.get("onsiteSituation")), serviceItemText), actorId);
-            }
-            case "ticket.verify" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireReporterOrPrivileged(ticketId, actorId, roles);
-                boolean approved = Boolean.parseBoolean(String.valueOf(args.getOrDefault("approved", true)));
-                yield ticketService.transition(ticketId, "verify",
-                        transition(ticket.getVersion(), null, approved, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.close" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireManager(roles);
-                yield ticketService.transition(ticketId, "close",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                str(args.get("closeReasonCode")), null, null, null), actorId);
-            }
-            case "ticket.cancel" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireManager(roles);
-                yield ticketService.transition(ticketId, "cancel",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, str(args.get("cancelReason")), null, null), actorId);
-            }
-            case "ticket.hold" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireHandler(ticketId, actorId, roles);
-                yield ticketService.transition(ticketId, "hold",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.resume" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireHandler(ticketId, actorId, roles);
-                yield ticketService.transition(ticketId, "resume",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.finish" -> {
-                long ticketId = requiredTicketId(args);
-                var ticket = ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireManager(roles);
-                yield ticketService.transition(ticketId, "finish",
-                        transition(ticket.getVersion(), null, null, str(args.get("reason")),
-                                null, null, null, null), actorId);
-            }
-            case "ticket.comment.add" -> {
-                long ticketId = requiredTicketId(args);
-                ticketAccessService.requireReadable(ticketId, actorId, roles);
-                yield ticketService.addComment(ticketId, required(args, "content"),
-                        str(args.getOrDefault("visibility", "PUBLIC")), actorId);
-            }
-            case "ticket.material.add" -> {
-                long ticketId = requiredTicketId(args);
-                ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireHandleRole(roles);
-                yield ticketMaterialService.add(ticketId, new AddTicketMaterialRequest(
-                        required(args, "materialName"),
-                        str(args.get("specification")),
-                        decimal(args.get("quantity")),
-                        str(args.get("unit")),
-                        decimal(args.get("amount")),
-                        str(args.get("remark"))), actorId);
-            }
-            case "ticket.visit.add" -> {
-                long ticketId = requiredTicketId(args);
-                ticketAccessService.requireReadable(ticketId, actorId, roles);
-                requireManager(roles);
-                yield ticketVisitService.add(ticketId, new AddTicketVisitRequest(
-                        boolValue(args.get("required")),
-                        str(args.get("visitMethod")),
-                        str(args.get("visitedAt")),
-                        str(args.get("visitResult")),
-                        str(args.getOrDefault("status", "DONE")),
-                        str(args.get("remark"))), actorId);
-            }
-            default -> throw new ApiException(ErrorCode.VALIDATION_ERROR, "不支持的能力: " + capability);
-        };
-    }
-
-    private CreateTicketRequest buildCreateRequest(Map<String, Object> args) {
-        return new CreateTicketRequest(
-                str(args.get("title")),
-                str(args.get("description")),
-                required(args, "ticketTypeCode"),
-                str(args.get("priorityCode")),
-                str(args.get("locationText")),
-                longValue(args.get("customerId")),
-                longValue(args.get("roomId")),
-                longValue(args.get("equipmentId")),
-                longValue(args.get("projectId")),
-                longValue(args.get("buildingId")),
-                longValue(args.get("serviceItemId")),
-                longValue(args.get("workflowId")),
-                str(args.get("appointmentAt")),
-                str(args.get("contactName")),
-                str(args.get("addressText")),
-                str(args.get("indoorPublicArea")),
-                str(args.get("locationType")),
-                str(args.get("serviceItemText"))
-        );
-    }
-
-    private void requireCreateRole(List<String> roles) {
-        if (roles == null || roles.stream().noneMatch(role ->
-                List.of("ADMIN", "DISPATCHER", "ENGINEER", "REPORTER").contains(role))) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "没有建单权限");
+    private AgentTaskEntity findExisting(long actorId, String clientTaskId) {
+        if (clientTaskId == null) {
+            return null;
         }
+        return taskMapper.selectOne(Wrappers.<AgentTaskEntity>lambdaQuery()
+                .eq(AgentTaskEntity::getTenantId, TENANT)
+                .eq(AgentTaskEntity::getActorId, actorId)
+                .eq(AgentTaskEntity::getClientTaskId, clientTaskId)
+                .last("LIMIT 1"));
     }
 
     private AgentTaskEntity find(String taskId) {
@@ -469,6 +314,32 @@ public class AgentTaskService {
             throw new ApiException(ErrorCode.TICKET_NOT_FOUND, "任务不存在");
         }
         return entity;
+    }
+
+    private void requireOwner(AgentTaskEntity entity, long actorId, String message) {
+        if (!entity.getActorId().equals(actorId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, message);
+        }
+    }
+
+    private void requireScope(String capability, List<String> scopes) {
+        if (scopes == null) {
+            return;
+        }
+        if (!(scopes.contains("*") || scopes.contains(capability))) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "委托令牌 scope 不允许该能力");
+        }
+    }
+
+    private String normalizeMode(String mode) {
+        if (!StringUtils.hasText(mode)) {
+            return MODE_SYNC;
+        }
+        String normalized = mode.trim().toUpperCase();
+        if (!List.of(MODE_SYNC, MODE_ASYNC).contains(normalized)) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "executionMode 只支持 SYNC/ASYNC");
+        }
+        return normalized;
     }
 
     private AgentTaskView toView(AgentTaskEntity entity) {
@@ -493,7 +364,8 @@ public class AgentTaskService {
                 entity.getInputTokens(),
                 entity.getOutputTokens(),
                 entity.getCostMicros(),
-                entity.getExecutionMode() == null ? "SYNC" : entity.getExecutionMode(),
+                entity.getExecutionMode() == null ? MODE_SYNC : entity.getExecutionMode(),
+                entity.getDelegationId(),
                 entity.getConfirmationToken(),
                 entity.getConfirmationExpiresAt() == null ? null
                         : entity.getConfirmationExpiresAt().atOffset(ZoneOffset.UTC)
@@ -504,59 +376,17 @@ public class AgentTaskService {
         );
     }
 
+    private AgentTaskEventView toEventView(AgentTaskEvent event) {
+        return new AgentTaskEventView(event.id(), event.taskId(), event.status(),
+                event.message(), event.createdAt());
+    }
+
     private boolean isWriteCapability(String capability) {
         return List.of("ticket.create", "ticket.export", "ticket.assign", "ticket.accept",
                         "ticket.resolve", "ticket.verify", "ticket.close", "ticket.cancel",
                         "ticket.hold", "ticket.resume", "ticket.finish", "ticket.comment.add",
                         "ticket.material.add", "ticket.visit.add")
                 .contains(capability);
-    }
-
-    private long requiredTicketId(Map<String, Object> args) {
-        Long ticketId = longValue(args.get("ticketId"));
-        if (ticketId == null) {
-            throw new ApiException(ErrorCode.VALIDATION_ERROR, "缺少参数: ticketId");
-        }
-        return ticketId;
-    }
-
-    private TransitionRequest transition(Integer version, Long assigneeId, Boolean approved,
-                                         String reason, String closeReasonCode, String cancelReason,
-                                         String onsiteSituation, String serviceItemText) {
-        return new TransitionRequest(version, assigneeId, approved, reason,
-                closeReasonCode, cancelReason, onsiteSituation, serviceItemText);
-    }
-
-    private void requireManager(List<String> roles) {
-        if (roles == null || roles.stream().noneMatch(role ->
-                List.of("ADMIN", "DISPATCHER").contains(role))) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "需要管理/调度权限");
-        }
-    }
-
-    private void requireHandleRole(List<String> roles) {
-        if (roles == null || roles.stream().noneMatch(role ->
-                List.of("ADMIN", "DISPATCHER", "ENGINEER", "INSPECTOR").contains(role))) {
-            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "需要处理权限");
-        }
-    }
-
-    private java.math.BigDecimal decimal(Object value) {
-        if (value == null || !StringUtils.hasText(String.valueOf(value))) {
-            return null;
-        }
-        try {
-            return new java.math.BigDecimal(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Boolean boolValue(Object value) {
-        if (value == null) {
-            return null;
-        }
-        return Boolean.parseBoolean(String.valueOf(value));
     }
 
     private Map<String, Object> capability(String name, String description, String permission,
@@ -570,86 +400,11 @@ public class AgentTaskService {
         return item;
     }
 
-    private String required(Map<String, Object> args, String key) {
-        String value = str(args.get(key));
-        if (!StringUtils.hasText(value)) {
-            throw new ApiException(ErrorCode.VALIDATION_ERROR, "缺少参数: " + key);
-        }
-        return value;
-    }
-
-    private String firstText(String preferred, String fallback) {
-        return StringUtils.hasText(preferred) ? preferred : fallback;
-    }
-
-    private String str(Object value) {
-        return value == null ? null : String.valueOf(value).trim();
-    }
-
-    private Long longValue(Object value) {
-        if (value == null || !StringUtils.hasText(String.valueOf(value))) {
-            return null;
-        }
-        try {
-            return Long.parseLong(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private int intValue(Object value, int defaultValue, int min, int max) {
-        try {
-            int number = value == null ? defaultValue : Integer.parseInt(String.valueOf(value));
-            return Math.min(Math.max(number, min), max);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private LocalDateTime parseTime(Object value) {
-        String text = str(value);
-        if (!StringUtils.hasText(text)) {
-            return null;
-        }
-        try {
-            return OffsetDateTime.parse(text).atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
-        } catch (Exception ignored) {
-            try {
-                return LocalDateTime.parse(text);
-            } catch (Exception e) {
-                return null;
-            }
-        }
-    }
-
-    private void recordEvent(String taskId, String status, String message) {
-        AgentTaskEventEntity event = new AgentTaskEventEntity();
-        event.setId(IdWorker.getId());
-        event.setTenantId(TENANT);
-        event.setTaskId(taskId);
-        event.setStatus(status);
-        event.setMessage(message);
-        event.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
-        eventMapper.insert(event);
-    }
-
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception e) {
             return "{}";
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> fromJson(String json) {
-        if (!StringUtils.hasText(json)) {
-            return Map.of();
-        }
-        try {
-            return objectMapper.readValue(json, Map.class);
-        } catch (Exception e) {
-            return Map.of();
         }
     }
 }

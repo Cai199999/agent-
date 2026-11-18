@@ -26,7 +26,7 @@
 ## 终极目标
 
 - 以 `docs/design/06-终极目标与能力评估.md` 为长期能力基线：真实业务任务、完整后端工程、Agent 规划、上下文与记忆、评估与可观测、人机协同。
-- 阶段目标：按 `docs/design/07-子Agent服务化改造方案与阶段目标.md`，将当前平台封装为未来大项目的 Property Maintenance Agent；P0/P1/P2/P3 已实现（Manifest 0.4.0、只读/写 Task API、工单生命周期写能力、确认令牌、`agent_task` 持久化、取消、任务事件、附件上传、Agent Card 发现），不重写现有业务；异步队列/实时事件流、独立部署、完整 A2A 鉴权仍待后续。
+- 阶段目标：按 `docs/design/07-子Agent服务化改造方案与阶段目标.md`，将当前平台封装为未来大项目的 Property Maintenance Agent；P0–P4 已实现（Manifest 0.5.0、只读/写 Task API、工单生命周期写能力、确认令牌、`agent_task` 持久化、取消、任务事件、附件上传、Agent Card、SYNC/ASYNC、SSE 事件流、HMAC 委托令牌、独立 agent Profile），不重写现有业务；持久化 MQ、进程崩溃任务恢复、真实 token/成本、完整 A2A 注册与物理拆服务仍待后续。
 - 当前为 v1 可演示/可试用版本，综合评估约 5/10，后续迭代必须对齐六项能力并有量化证据。
 
 ## 关键约束

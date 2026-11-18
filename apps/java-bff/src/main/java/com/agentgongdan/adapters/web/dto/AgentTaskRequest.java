@@ -8,6 +8,7 @@ public record AgentTaskRequest(
         @NotBlank(message = "taskType 不能为空") String taskType,
         Map<String, Object> input,
         Map<String, Object> contextRefs,
-        String clientTaskId
+        String clientTaskId,
+        String executionMode
 ) {
 }

@@ -119,6 +119,10 @@ mvn spring-boot:run
 # Web（终端 3）
 cd apps/web
 npm run dev
+
+# 可选：独立 Agent 实例（只暴露 /agent/**，默认 8400）
+# java -jar target/agent-gongdan-java-bff-0.0.1-SNAPSHOT.jar \
+#   --spring.profiles.active=agent
 ```
 
 访问：
@@ -259,7 +263,7 @@ agent-gongdan/
 - 认证与权限、工单闭环、评论/附件、知识库/RAG、AI 对话、分诊草稿、Agent 工具、相似工单、通知轮询、工单 AI 分析、M8 轻量降级、Excel Phase A 导出、AI 自然语言导出（确认后生成）。
 - Phase 2 数据模型基础：`biz_project/building/room/customer/customer_room/equipment/service_item/workflow/workflow_node`、`ticket_material`、`ticket_visit` 与工单扩展字段（V12–V14）；dev 已 seed 演示主数据。
 - 主数据只读 API `/api/v1/master-data/options`、客户端个人中心与绑定审核、简化建单（室内/室外）、详情展示、现场照片强制、票级访问控制、材料与回访 API、Playwright 浏览器 E2E 已接入。
-- 子 Agent P3：`/agent/v1/manifest`（0.4.0）、只读/写 Task API（查询/详情/相似/知识检索/建单/导出/派单/接单/解决/验证/关闭/挂起/恢复/结束/评论/材料/回访）、确认令牌、任务持久化/取消/事件、附件上传、`/.well-known/agent-card.json` 发现端点已接入；异步队列、实时事件流与独立部署待后续。
+- 子 Agent P4：`/agent/v1/manifest`（0.5.0）、只读/写 Task API、确认令牌、任务持久化/取消/事件、附件上传、Agent Card、`SYNC/ASYNC`、SSE 事件流、`X-Delegation-Token` 委托令牌、`agent` Profile 独立实例已接入；持久化 MQ、崩溃任务恢复、真实 token/成本与物理拆服务待后续。
 
 暂未接入：
 

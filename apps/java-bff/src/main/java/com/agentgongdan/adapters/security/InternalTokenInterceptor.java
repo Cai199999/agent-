@@ -1,5 +1,7 @@
 package com.agentgongdan.adapters.security;
 
+import com.agentgongdan.app.ports.security.DelegationClaims;
+import com.agentgongdan.app.ports.security.DelegationTokenPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,13 +23,16 @@ import java.util.stream.Collectors;
 public class InternalTokenInterceptor implements HandlerInterceptor {
 
     private final Set<String> tokens;
+    private final DelegationTokenPort delegationTokenPort;
 
     public InternalTokenInterceptor(
             @Value("${INTERNAL_TOKEN_P2J_CURRENT:}") String current,
-            @Value("${INTERNAL_TOKEN_P2J_NEXT:}") String next) {
+            @Value("${INTERNAL_TOKEN_P2J_NEXT:}") String next,
+            DelegationTokenPort delegationTokenPort) {
         this.tokens = java.util.stream.Stream.of(current, next)
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toUnmodifiableSet());
+        this.delegationTokenPort = delegationTokenPort;
     }
 
     @Override
@@ -35,6 +40,15 @@ public class InternalTokenInterceptor implements HandlerInterceptor {
         String token = request.getHeader("X-Internal-Token");
         if (!StringUtils.hasText(token) || !tokens.contains(token)) {
             throw new ApiException(ErrorCode.AUTH_UNAUTHORIZED, "内部令牌无效");
+        }
+        String delegationToken = request.getHeader("X-Delegation-Token");
+        if (StringUtils.hasText(delegationToken)) {
+            DelegationClaims claims = delegationTokenPort.verify(delegationToken);
+            request.setAttribute("internalActorId", claims.actorId());
+            request.setAttribute("internalActorRoles", claims.roles());
+            request.setAttribute("internalDelegationScopes", claims.scopes());
+            request.setAttribute("internalDelegationId", claims.delegationId());
+            return true;
         }
         long actorId = 0L;
         String actorHeader = request.getHeader("X-Actor-Id");

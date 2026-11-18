@@ -1,0 +1,17 @@
+# 独立 Agent 服务实例：复用同一构建产物，只暴露 /agent/** 与发现/健康端点。
+# 启动：JAVA_OPTS 之外追加 --spring.profiles.active=agent
+server:
+  port: ${AGENT_SERVICE_PORT:8400}
+
+agent:
+  deployment:
+    standalone: true
+  task:
+    executor:
+      core-size: ${AGENT_TASK_CORE_SIZE:8}
+      max-size: ${AGENT_TASK_MAX_SIZE:16}
+      queue-capacity: ${AGENT_TASK_QUEUE_CAPACITY:1000}
+    stream:
+      poll-interval-ms: ${AGENT_TASK_STREAM_POLL_MS:1000}
+      heartbeat-interval-ms: ${AGENT_TASK_STREAM_HEARTBEAT_MS:15000}
+      timeout-ms: ${AGENT_TASK_STREAM_TIMEOUT_MS:600000}
