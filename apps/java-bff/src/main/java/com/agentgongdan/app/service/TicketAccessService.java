@@ -37,7 +37,7 @@ public class TicketAccessService {
 
     public TicketEntity requireHandler(long ticketId, long userId, List<String> roles) {
         TicketEntity ticket = requireReadable(ticketId, userId, roles);
-        if (!isPrivileged(roles) && !Objects.equals(ticket.getAssigneeId(), userId)) {
+        if (!isManager(roles) && !Objects.equals(ticket.getAssigneeId(), userId)) {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "仅当前处理人可执行该操作");
         }
         return ticket;
@@ -45,7 +45,7 @@ public class TicketAccessService {
 
     public TicketEntity requireHandlerOrUnassigned(long ticketId, long userId, List<String> roles) {
         TicketEntity ticket = requireReadable(ticketId, userId, roles);
-        if (!isPrivileged(roles) && ticket.getAssigneeId() != null
+        if (!isManager(roles) && ticket.getAssigneeId() != null
                 && !Objects.equals(ticket.getAssigneeId(), userId)) {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "该工单已派给其他处理人");
         }
@@ -54,10 +54,14 @@ public class TicketAccessService {
 
     public TicketEntity requireReporterOrPrivileged(long ticketId, long userId, List<String> roles) {
         TicketEntity ticket = requireReadable(ticketId, userId, roles);
-        if (!isPrivileged(roles) && !Objects.equals(ticket.getReporterId(), userId)) {
+        if (!isManager(roles) && !Objects.equals(ticket.getReporterId(), userId)) {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "仅报障人可执行该操作");
         }
         return ticket;
+    }
+
+    private boolean isManager(List<String> roles) {
+        return roles != null && (roles.contains("ADMIN") || roles.contains("DISPATCHER"));
     }
 
     public boolean isPrivileged(List<String> roles) {
