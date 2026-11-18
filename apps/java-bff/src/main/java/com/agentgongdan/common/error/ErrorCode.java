@@ -25,6 +25,7 @@ public enum ErrorCode {
     KB_VECTOR_STORE_ERROR(40003, "向量库异常"),
     SYS_STORAGE_ERROR(50003, "对象存储异常"),
     SYS_DEPENDENCY_UNAVAILABLE(50004, "依赖不可用"),
+    SYS_RATE_LIMITED(50002, "请求过于频繁，请稍后重试"),
     VALIDATION_ERROR(60001, "参数校验失败"),
     VALIDATION_FILE_TYPE(60002, "文件类型不支持"),
     VALIDATION_FILE_SIZE(60003, "文件超限"),

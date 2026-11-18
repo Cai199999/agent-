@@ -30,6 +30,8 @@ run/
 *.pid
 
 # Playwright 产物
+test-results/
+playwright-report/
 apps/web/test-results/
 apps/web/playwright-report/
 

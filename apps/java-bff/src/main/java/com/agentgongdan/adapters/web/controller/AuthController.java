@@ -4,9 +4,13 @@ import com.agentgongdan.adapters.web.dto.LoginRequest;
 import com.agentgongdan.adapters.web.dto.LoginResponse;
 import com.agentgongdan.adapters.web.dto.MeResponse;
 import com.agentgongdan.adapters.web.dto.UserView;
+import com.agentgongdan.adapters.security.LoginRateLimiter;
 import com.agentgongdan.app.dto.AuthResult;
 import com.agentgongdan.app.service.AuthService;
 import com.agentgongdan.common.api.ApiResponse;
+import com.agentgongdan.common.error.ApiException;
+import com.agentgongdan.common.error.ErrorCode;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,14 +23,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final LoginRateLimiter rateLimiter;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, LoginRateLimiter rateLimiter) {
         this.authService = authService;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request,
+                                            HttpServletRequest httpRequest) {
+        String key = httpRequest.getRemoteAddr();
+        if (!rateLimiter.allow(key)) {
+            throw new ApiException(ErrorCode.SYS_RATE_LIMITED);
+        }
         AuthResult result = authService.login(request.username(), request.password());
+        rateLimiter.reset(key);
         return ApiResponse.ok(new LoginResponse(
                 result.accessToken(),
                 result.expiresIn(),

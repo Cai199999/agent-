@@ -26,6 +26,7 @@ public class GlobalExceptionHandler {
             case TICKET_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case TICKET_STATE_CONFLICT, TICKET_ASSIGN_CONFLICT, TICKET_IDEMPOTENCY_CONFLICT ->
                     HttpStatus.CONFLICT;
+            case SYS_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
             case VALIDATION_FILE_SIZE -> HttpStatus.PAYLOAD_TOO_LARGE;
             case SYS_STORAGE_ERROR, KB_VECTOR_STORE_ERROR, SYS_DEPENDENCY_UNAVAILABLE, AI_UNAVAILABLE ->
                     HttpStatus.SERVICE_UNAVAILABLE;

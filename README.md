@@ -142,6 +142,8 @@ cd apps/web
 npm run typecheck
 npm run build
 npm test
+# 浏览器级 E2E（需要三端运行）
+npm run e2e
 
 # E2E API 冒烟
 cd .. && cd ..

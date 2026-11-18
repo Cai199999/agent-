@@ -159,77 +159,14 @@
       />
     </el-card>
 
-    <el-dialog v-model="createVisible" title="报修 / 报事" width="640px">
-      <el-form v-loading="masterDataLoading" :model="createForm" label-width="100px">
-        <el-form-item label="报修人">
-          <span>{{ profile.contactName || auth.user?.displayName || "-" }}</span>
-          <span v-if="profile.phoneMask" class="muted profile-phone">{{ profile.phoneMask }}</span>
-          <router-link to="/profile" class="profile-link">完善个人信息</router-link>
-        </el-form-item>
-        <el-form-item label="描述" required>
-          <el-input
-            v-model="createForm.description"
-            type="textarea"
-            :rows="4"
-            maxlength="2000"
-            show-word-limit
-            placeholder="请描述故障现象、影响范围，标题会根据描述自动生成"
-          />
-        </el-form-item>
-        <el-form-item label="类型" required>
-          <el-select v-model="createForm.ticketTypeCode" style="width: 100%">
-            <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="位置类型" required>
-          <el-radio-group v-model="createForm.locationType" @change="onLocationTypeChange">
-            <el-radio-button label="INDOOR">室内</el-radio-button>
-            <el-radio-button label="OUTDOOR">室外</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <template v-if="createForm.locationType === 'INDOOR'">
-          <el-form-item label="楼宇" required>
-            <el-select v-model="createForm.buildingId" style="width: 100%" @change="onBuildingChange">
-              <el-option v-for="item in buildingOptions" :key="item.id" :label="item.name" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="房间" required>
-            <el-select v-model="createForm.roomId" style="width: 100%">
-              <el-option
-                v-for="item in roomOptions"
-                :key="item.id"
-                :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
-                :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
-        </template>
-        <el-form-item label="位置" required>
-          <el-input v-model="createForm.locationText" placeholder="如 A栋2号梯 / 东门地下车库" />
-        </el-form-item>
-        <el-form-item label="详细地址">
-          <el-input v-model="createForm.addressText" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="现场图片">
-          <el-upload
-            v-model:file-list="createFileList"
-            list-type="picture-card"
-            accept="image/*"
-            :auto-upload="false"
-            multiple
-            :on-change="onCreateFileChange"
-            :on-remove="onCreateFileRemove"
-          >
-            <span class="upload-plus">+</span>
-          </el-upload>
-          <div class="muted upload-hint">可选，支持手机拍摄或相册选择</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="createTicket">提交</el-button>
-      </template>
-    </el-dialog>
+    <TicketCreateDialog
+      v-model="createVisible"
+      :profile="profile"
+      :master-data="masterData"
+      :loading="masterDataLoading"
+      :saving="creating"
+      @submit="handleCreateSubmit"
+    />
 
     <el-dialog v-model="assignVisible" title="派单" width="440px">
       <el-form label-width="80px">
@@ -546,12 +483,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { http, toErrorMessage } from "@/api/http";
 import { getMasterDataOptions, type MasterDataOptions } from "@/api/masterData";
 import { getProfile, type UserProfile } from "@/api/profile";
+import TicketCreateDialog from "./components/TicketCreateDialog.vue";
 import {
   addMaterial,
   addVisit,
@@ -774,19 +712,7 @@ const typeOptions = [
   { label: "其他", value: "OTHER" },
 ];
 
-const createForm = reactive({
-  description: "",
-  ticketTypeCode: "ELEVATOR",
-  locationType: "INDOOR",
-  locationText: "",
-  buildingId: "",
-  roomId: "",
-  addressText: "",
-});
-
 const profile = ref<UserProfile>({});
-const createFileList = ref<any[]>([]);
-const createFiles = ref<File[]>([]);
 
 const masterData = ref<MasterDataOptions>({
   projects: [],
@@ -797,38 +723,6 @@ const masterData = ref<MasterDataOptions>({
   serviceItems: [],
 });
 const masterDataLoading = ref(false);
-
-const buildingOptions = computed(() =>
-  masterData.value.buildings.filter((item) => !profile.value.projectId || item.parentId === profile.value.projectId),
-);
-const roomOptions = computed(() =>
-  masterData.value.rooms.filter((item) => !createForm.buildingId || item.parentId === createForm.buildingId),
-);
-
-function onLocationTypeChange(): void {
-  if (createForm.locationType === "OUTDOOR") {
-    createForm.buildingId = "";
-    createForm.roomId = "";
-  }
-}
-
-function onCreateFileChange(file: any): void {
-  if (file.raw && file.raw.type?.startsWith("image/")) {
-    if (!createFiles.value.some((item) => item.name === file.name && item.size === file.raw.size)) {
-      createFiles.value.push(file.raw);
-    }
-  }
-}
-
-function onCreateFileRemove(file: any): void {
-  createFiles.value = createFiles.value.filter(
-    (item) => !(item.name === file.name && item.size === file.raw?.size),
-  );
-}
-
-function onBuildingChange(): void {
-  createForm.roomId = "";
-}
 
 async function loadMasterData(): Promise<void> {
   if (masterData.value.projects.length) return;
@@ -1076,18 +970,6 @@ async function resume(row: TicketSummary): Promise<void> {
   });
 }
 
-function resetCreateForm(): void {
-  createForm.description = "";
-  createForm.ticketTypeCode = "ELEVATOR";
-  createForm.locationType = "INDOOR";
-  createForm.locationText = "";
-  createForm.buildingId = "";
-  createForm.roomId = "";
-  createForm.addressText = "";
-  createFileList.value = [];
-  createFiles.value = [];
-}
-
 async function loadProfile(): Promise<void> {
   try {
     profile.value = await getProfile();
@@ -1138,50 +1020,23 @@ async function uploadTicketFiles(
   return uploaded;
 }
 
-async function uploadCreateFiles(ticketId: string): Promise<void> {
-  await uploadTicketFiles(ticketId, createFiles.value, "USER");
-}
-
-async function createTicket(): Promise<void> {
-  if (!createForm.description.trim() || !createForm.ticketTypeCode) {
-    ElMessage.warning("请填写描述和类型");
-    return;
-  }
-  if (!createForm.locationType || !createForm.locationText.trim()) {
-    ElMessage.warning("请选择室内/室外并填写位置");
-    return;
-  }
-  if (createForm.locationType === "INDOOR" && (!createForm.buildingId || !createForm.roomId)) {
-    ElMessage.warning("室内报修请选择楼宇和房间");
-    return;
-  }
+async function handleCreateSubmit(value: { payload: Record<string, unknown>; files: File[] }): Promise<void> {
   if (!idempotencyKey.value) {
     idempotencyKey.value = crypto.randomUUID();
   }
   creating.value = true;
   try {
-    const payload = {
-      description: createForm.description.trim(),
-      ticketTypeCode: createForm.ticketTypeCode,
-      priorityCode: "NORMAL",
-      locationType: createForm.locationType,
-      locationText: createForm.locationText.trim(),
-      buildingId: createForm.locationType === "INDOOR" ? createForm.buildingId || null : null,
-      roomId: createForm.locationType === "INDOOR" ? createForm.roomId || null : null,
-      addressText: createForm.addressText.trim() || null,
-    };
-    const body = (await http.post("/tickets", payload, {
+    const body = (await http.post("/tickets", value.payload, {
       headers: { "Idempotency-Key": idempotencyKey.value },
     })) as any;
     if (body.code !== 0) throw new Error(body.message);
     const ticketId = body.data.ticket.id;
-    if (createFiles.value.length) {
-      await uploadCreateFiles(ticketId);
+    if (value.files.length) {
+      await uploadTicketFiles(ticketId, value.files, "USER");
     }
     ElMessage.success(`工单已创建：${body.data.ticket.ticketNo}`);
     createVisible.value = false;
     idempotencyKey.value = "";
-    resetCreateForm();
     await load();
   } catch (error: any) {
     ElMessage.error(toErrorMessage(error, "创建失败"));
