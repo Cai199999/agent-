@@ -16,6 +16,18 @@ public record TicketSummary(
         String createdAt,
         String updatedAt,
         String slaResolveDueAt,
-        Integer version
+        Integer version,
+        String projectId,
+        String buildingId,
+        String serviceItemId,
+        String currentNodeCode,
+        String appointmentAt,
+        String receivedAt,
+        String arrivedAt,
+        String taskDueAt,
+        String contactName,
+        String contactPhoneMask,
+        String addressText,
+        String indoorPublicArea
 ) {
 }

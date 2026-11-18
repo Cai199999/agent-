@@ -294,6 +294,20 @@
             <el-descriptions-item label="报障人">{{ detail.reporterName || detail.ticket.reporterId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="处理人">{{ detail.assigneeName || detail.ticket.assigneeId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="位置">{{ detail.ticket.locationText || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="项目">{{ masterName(masterData.projects, detail.ticket.projectId) }}</el-descriptions-item>
+            <el-descriptions-item label="楼宇">{{ masterName(masterData.buildings, detail.ticket.buildingId) }}</el-descriptions-item>
+            <el-descriptions-item label="房间">{{ masterName(masterData.rooms, detail.ticket.roomId) }}</el-descriptions-item>
+            <el-descriptions-item label="客户">{{ masterName(masterData.customers, detail.ticket.customerId) }}</el-descriptions-item>
+            <el-descriptions-item label="服务项目">{{ masterName(masterData.serviceItems, detail.ticket.serviceItemId) }}</el-descriptions-item>
+            <el-descriptions-item label="设备">{{ masterName(masterData.equipment, detail.ticket.equipmentId) }}</el-descriptions-item>
+            <el-descriptions-item label="当前节点">{{ nodeLabel(detail.ticket.currentNodeCode) }}</el-descriptions-item>
+            <el-descriptions-item label="预约时间">{{ formatTime(detail.ticket.appointmentAt) || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="收单时间">{{ formatTime(detail.ticket.receivedAt) || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="到场时间">{{ formatTime(detail.ticket.arrivedAt) || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="联系人">{{ detail.ticket.contactName || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="联系电话">{{ detail.ticket.contactPhoneMask || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="户内/公区">{{ areaLabel(detail.ticket.indoorPublicArea) }}</el-descriptions-item>
+            <el-descriptions-item label="详细地址" :span="2">{{ detail.ticket.addressText || "-" }}</el-descriptions-item>
             <el-descriptions-item label="挂起累计">{{ detail.holdMinutes || 0 }} 分钟</el-descriptions-item>
             <el-descriptions-item label="首次响应到期">
               {{ formatTime(detail.sla?.responseDueAt) }}
@@ -430,10 +444,25 @@ interface TicketSummary {
   ticketTypeCode: string;
   reporterId?: string;
   assigneeId?: string;
+  customerId?: string | null;
+  roomId?: string | null;
+  equipmentId?: string | null;
   locationText?: string;
   createdAt?: string;
   slaResolveDueAt?: string;
   version: number;
+  projectId?: string | null;
+  buildingId?: string | null;
+  serviceItemId?: string | null;
+  currentNodeCode?: string | null;
+  appointmentAt?: string | null;
+  receivedAt?: string | null;
+  arrivedAt?: string | null;
+  taskDueAt?: string | null;
+  contactName?: string | null;
+  contactPhoneMask?: string | null;
+  addressText?: string | null;
+  indoorPublicArea?: string | null;
 }
 
 interface TicketEventView {
@@ -655,6 +684,27 @@ function can(permission: string): boolean {
   return auth.permissions.includes(permission);
 }
 
+function masterName(options: { id: string; name: string }[], id?: string | null): string {
+  if (!id) return "-";
+  return options.find((item) => item.id === id)?.name || id;
+}
+
+function nodeLabel(code?: string | null): string {
+  return (
+    {
+      ACCEPT: "受理",
+      DISPATCH: "派单",
+      HANDLE: "处理",
+      VERIFY: "验证",
+      CLOSE: "关闭",
+    } as Record<string, string>
+  )[code || ""] || code || "-";
+}
+
+function areaLabel(code?: string | null): string {
+  return code === "INDOOR" ? "户内" : code === "PUBLIC" ? "公区" : "-";
+}
+
 function statusLabel(status: string): string {
   return (
     {
@@ -679,7 +729,7 @@ function statusTag(status: string): "success" | "warning" | "info" | "danger" | 
   return "info";
 }
 
-function formatTime(value?: string): string {
+function formatTime(value?: string | null): string {
   if (!value) return "-";
   return new Date(value).toLocaleString();
 }
@@ -969,6 +1019,7 @@ async function cancel(row: TicketSummary): Promise<void> {
 }
 
 async function openDetail(row: TicketSummary): Promise<void> {
+  void loadMasterData();
   detailVisible.value = true;
   detailLoading.value = true;
   similarTickets.value = [];
@@ -1102,6 +1153,7 @@ async function addComment(): Promise<void> {
 
 onMounted(() => {
   void load();
+  void loadMasterData();
   if (route.query.create === "1") {
     openCreate();
     void router.replace({ path: "/tickets" });

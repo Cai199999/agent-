@@ -571,7 +571,19 @@ public class TicketService {
                 iso(ticket.getCreatedAt()),
                 iso(ticket.getUpdatedAt()),
                 iso(ticket.getSlaResolveDueAt()),
-                ticket.getVersion()
+                ticket.getVersion(),
+                str(ticket.getProjectId()),
+                str(ticket.getBuildingId()),
+                str(ticket.getServiceItemId()),
+                ticket.getCurrentNodeCode(),
+                iso(ticket.getAppointmentAt()),
+                iso(ticket.getReceivedAt()),
+                iso(ticket.getArrivedAt()),
+                iso(ticket.getTaskDueAt()),
+                ticket.getContactName(),
+                ticket.getContactPhoneMask(),
+                ticket.getAddressText(),
+                ticket.getIndoorPublicArea()
         );
     }
 
