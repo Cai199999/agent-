@@ -555,7 +555,7 @@
 
 **维护规则**：新增/修改 Controller 或 Python 路由时，同一提交内更新本节数量与差异；P0 接口变更必须先改本文档再改代码。
 
-### 4.11 子 Agent P0 接口（`/agent/v1`）
+### 4.11 子 Agent 接口（`/agent/v1`）
 
 > 用于未来大项目/Orchestrator 调用当前平台；鉴权复用内部令牌，Actor 通过 `X-Actor-Id` / `X-Actor-Roles` 传递。
 
@@ -563,10 +563,11 @@
 |---|---|---|---|
 | GET | `/agent/v1/manifest` | Agent Card/能力清单 | 内部令牌 |
 | GET | `/agent/v1/capabilities` | 能力清单别名 | 内部令牌 |
-| POST | `/agent/v1/tasks` | 提交只读任务 | `ticket.query` / `ticket.detail` / `ticket.similar` / `knowledge.search` |
+| POST | `/agent/v1/tasks` | 提交只读/写任务 | `ticket.query` / `ticket.detail` / `ticket.similar` / `knowledge.search` / `ticket.create` / `ticket.export` |
 | GET | `/agent/v1/tasks/{taskId}` | 查询任务结果 | 内部令牌 + 同 Actor |
+| POST | `/agent/v1/tasks/{taskId}/confirm` | 确认写任务 | 同 Actor + `confirmationToken` |
 
-P0 限制：任务存内存、只读、不同步写业务、不支持确认/异步；P1 再落 `agent_task` 表并支持 `WAITING_CONFIRM`。
+P1 已实现：`agent_task` 持久化、`ticket.create` / `ticket.export` 的 `WAITING_CONFIRM`、10 分钟一次性确认令牌。异步/取消/成本字段待补。
 
 ---
 

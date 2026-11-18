@@ -1,5 +1,6 @@
 package com.agentgongdan.adapters.web.controller;
 
+import com.agentgongdan.adapters.web.dto.AgentConfirmRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskView;
 import com.agentgongdan.app.service.AgentTaskService;
@@ -54,5 +55,15 @@ public class AgentTaskController {
             @PathVariable String taskId,
             @RequestAttribute("internalActorId") long actorId) {
         return ApiResponse.ok(agentTaskService.get(taskId, actorId));
+    }
+
+    @PostMapping("/tasks/{taskId}/confirm")
+    public ApiResponse<AgentTaskView> confirm(
+            @PathVariable String taskId,
+            @Valid @RequestBody AgentConfirmRequest request,
+            @RequestAttribute("internalActorId") long actorId,
+            @RequestAttribute("internalActorRoles") List<String> roles) {
+        return ApiResponse.ok(agentTaskService.confirm(
+                taskId, request.confirmationToken(), actorId, roles));
     }
 }

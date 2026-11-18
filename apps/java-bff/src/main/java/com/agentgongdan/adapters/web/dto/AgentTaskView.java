@@ -10,6 +10,8 @@ public record AgentTaskView(
         String errorMessage,
         String traceId,
         long latencyMs,
+        String confirmationToken,
+        String confirmationExpiresAt,
         String createdAt
 ) {
 }

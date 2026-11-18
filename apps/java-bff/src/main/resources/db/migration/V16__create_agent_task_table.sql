@@ -1,0 +1,28 @@
+-- V16: 子 Agent 任务持久化（P1）
+CREATE TABLE agent_task (
+    id BIGINT NOT NULL COMMENT '主键',
+    tenant_id BIGINT NOT NULL DEFAULT 0 COMMENT '租户 ID',
+    task_id VARCHAR(64) NOT NULL COMMENT '任务 UUID',
+    agent_id VARCHAR(64) NOT NULL COMMENT '子 Agent ID',
+    capability VARCHAR(64) NOT NULL COMMENT '能力编码',
+    status VARCHAR(32) NOT NULL COMMENT 'SUCCEEDED/FAILED/WAITING_CONFIRM/CANCELLED',
+    actor_id BIGINT NOT NULL COMMENT 'Actor 用户 ID',
+    actor_roles VARCHAR(255) NULL COMMENT 'Actor 角色',
+    client_task_id VARCHAR(128) NULL COMMENT '调用方任务幂等键',
+    input_json JSON NULL COMMENT '任务输入',
+    result_json JSON NULL COMMENT '任务结果',
+    error_code VARCHAR(64) NULL COMMENT '错误码',
+    error_message VARCHAR(500) NULL COMMENT '错误信息',
+    confirmation_token VARCHAR(64) NULL COMMENT '确认令牌',
+    confirmation_expires_at DATETIME(3) NULL COMMENT '确认过期时间',
+    trace_id VARCHAR(64) NULL COMMENT '追踪 ID',
+    latency_ms INT NULL COMMENT '耗时',
+    confirmed_at DATETIME(3) NULL COMMENT '确认时间',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_agent_task_task_id (tenant_id, task_id),
+    UNIQUE KEY uk_agent_task_client (tenant_id, actor_id, client_task_id),
+    KEY idx_agent_task_actor (actor_id, created_at),
+    KEY idx_agent_task_status (status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='子 Agent 任务';

@@ -405,15 +405,31 @@ passed=6 failed=0 total=6
 
 覆盖：Manifest、ticket.query、GET task、ticket.detail by ticketNo、knowledge.search、未知能力拒绝。
 
-### 9.5 下一步
+### 9.5 P1 实现记录（2026-11-18）
 
-P1：
+已完成 P1 核心写能力与确认：
 
-- `agent_task` 表；
-- `ticket.create` / `ticket.export` 的 `WAITING_CONFIRM`；
-- 任务状态查询与取消；
-- 审计与成本字段；
-- 现有 E2E 回归。
+- `V16__create_agent_task_table.sql`：任务持久化；
+- `POST /agent/v1/tasks/{taskId}/confirm`；
+- `ticket.create` / `ticket.export`：先 `WAITING_CONFIRM`，确认后执行；
+- 确认令牌：10 分钟、一次性、Actor 校验；
+- 任务按 `taskId` 持久化，重启不丢失；
+- `clientTaskId` 幂等。
+
+验证：
+
+```bash
+apps/python-ai/.venv/bin/python scripts/e2e/agent_p1_smoke.py
+# passed=4 failed=0 total=4
+```
+
+仍未做：
+
+- 异步任务/事件流；
+- 取消；
+- 成本字段；
+- 独立部署；
+- 更多写工具（派单/解决/材料/回访）。
 
 ---
 
