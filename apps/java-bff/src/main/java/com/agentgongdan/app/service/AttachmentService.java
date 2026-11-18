@@ -69,6 +69,11 @@ public class AttachmentService {
 
     @Transactional
     public AttachmentView upload(long ticketId, MultipartFile file, long userId) {
+        return upload(ticketId, file, userId, "GENERAL");
+    }
+
+    @Transactional
+    public AttachmentView upload(long ticketId, MultipartFile file, long userId, String attachmentType) {
         requireTicket(ticketId);
         if (file == null || file.isEmpty()) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "文件不能为空");
@@ -125,7 +130,7 @@ public class AttachmentService {
             attachment.setTenantId(0L);
             attachment.setTicketId(ticketId);
             attachment.setFileId(fileId);
-            attachment.setAttachmentType("GENERAL");
+            attachment.setAttachmentType(normalizeType(attachmentType));
             attachment.setCreatedBy(userId);
             attachmentMapper.insert(attachment);
 
@@ -240,6 +245,20 @@ public class AttachmentService {
             }
         }
         return true;
+    }
+
+    public boolean hasOnsiteImage(long ticketId, long userId) {
+        return attachmentMapper.selectCount(Wrappers.<TicketAttachmentEntity>lambdaQuery()
+                .eq(TicketAttachmentEntity::getTenantId, 0L)
+                .eq(TicketAttachmentEntity::getTicketId, ticketId)
+                .eq(TicketAttachmentEntity::getAttachmentType, "ONSITE")
+                .eq(TicketAttachmentEntity::getCreatedBy, userId)
+                .isNull(TicketAttachmentEntity::getDeletedAt)) > 0;
+    }
+
+    private String normalizeType(String attachmentType) {
+        String type = StringUtils.hasText(attachmentType) ? attachmentType.trim().toUpperCase() : "GENERAL";
+        return Set.of("GENERAL", "USER", "ONSITE").contains(type) ? type : "GENERAL";
     }
 
     private String contentTypeOf(String extension, String provided) {

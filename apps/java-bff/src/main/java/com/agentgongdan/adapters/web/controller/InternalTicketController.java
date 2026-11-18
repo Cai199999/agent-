@@ -57,12 +57,12 @@ public class InternalTicketController {
         return ApiResponse.ok(ticketService.listInternal(actorId, roles, status, keyword, limit));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{ref}")
     public ApiResponse<TicketDetail> detail(
-            @PathVariable long id,
+            @PathVariable String ref,
             @RequestAttribute("internalActorId") long actorId,
             @RequestAttribute("internalActorRoles") List<String> roles) {
-        return ApiResponse.ok(ticketService.detailInternal(id, actorId, roles));
+        return ApiResponse.ok(ticketService.detailInternalRef(ref, actorId, roles));
     }
 
     @GetMapping("/similar")

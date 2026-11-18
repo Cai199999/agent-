@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -246,6 +247,19 @@ def main() -> int:
                 engineer_token = login(client, ENGINEER_USER)
                 if engineer_token:
                     transition(client, engineer_token, str(ticket_id), "accept", {})
+                    png = base64.b64decode(
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+                        "/x8AAusB9Wl6n0kAAAAASUVORK5CYII="
+                    )
+                    upload = client.post(
+                        f"{BASE}/tickets/{ticket_id}/attachments",
+                        params={"type": "ONSITE"},
+                        headers={"Authorization": f"Bearer {engineer_token}"},
+                        files={"file": ("onsite.png", png, "image/png")},
+                    )
+                    check("现场照片上传",
+                          upload.status_code == 200 and upload.json().get("code") == 0,
+                          f"http={upload.status_code}")
                     transition(client, engineer_token, str(ticket_id), "resolve",
                                {"reason": "E2E：现场已恢复，门锁检查正常",
                                 "serviceItemText": "电梯困人现场处置"})

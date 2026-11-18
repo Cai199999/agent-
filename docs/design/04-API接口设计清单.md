@@ -403,7 +403,7 @@
 | POST | `/api/v1/tickets/{id}/claim` | 认领 | `ticket:claim` | P0 |
 | POST | `/api/v1/tickets/{id}/transfer` | 转负责人/转物业部 | `ticket:assign` | P1 |
 | POST | `/api/v1/tickets/{id}/accept` | 接单 | `ticket:handle` | P0 |
-| POST | `/api/v1/tickets/{id}/resolve` | 提交解决 | `ticket:handle` | P0 |
+| POST | `/api/v1/tickets/{id}/resolve` | 提交解决（必填 `serviceItemText`；必须先上传 `ONSITE` 现场照片） | `ticket:handle` | P0 |
 | POST | `/api/v1/tickets/{id}/verify` | 验证通过/不通过 | `ticket:verify` | P0 |
 | POST | `/api/v1/tickets/{id}/close` | 关闭 | `ticket:close` | P0 |
 | POST | `/api/v1/tickets/{id}/reopen` | 重开 | `ticket:close` | P1 |
@@ -413,7 +413,7 @@
 | GET | `/api/v1/tickets/{id}/events` | 时间线（游标） | `ticket:read` | P0 |
 | GET | `/api/v1/tickets/{id}/comments` | 评论列表 | `ticket:read` | P0 |
 | POST | `/api/v1/tickets/{id}/comments` | 添加评论 | `ticket:read` | P0 |
-| POST | `/api/v1/tickets/{id}/attachments` | 上传附件 | `ticket:update` | P0 |
+| POST | `/api/v1/tickets/{id}/attachments?type=USER|ONSITE|GENERAL` | 上传附件（报修人图片用 `USER`，处理人现场照片用 `ONSITE`） | `ticket:update` | P0 |
 | DELETE | `/api/v1/tickets/{id}/attachments/{attachmentId}` | 删除附件 | `ticket:update` | P0 |
 | GET | `/api/v1/tickets/{id}/materials` | 使用材料列表 | `ticket:read` | P0 |
 | POST | `/api/v1/tickets/{id}/materials` | 添加使用材料 | `ticket:handle` | P0 |
@@ -595,7 +595,7 @@
 | 方法 | 路径 | 用途 | 超时 | 幂等 |
 |---|---|---|---|---|
 | POST | `/internal/v1/tickets` | 工具建单 | 5s | 是（`Idempotency-Key`） |
-| GET | `/internal/v1/tickets/{id}` | 查询工单 | 3s | 是 |
+| GET | `/internal/v1/tickets/{idOrNo}` | 查询工单（支持数字 ID 或工单号） | 3s | 是 |
 | GET | `/internal/v1/tickets` | 我的/待办工单 | 3s | 是 |
 | GET | `/internal/v1/tickets/similar` | 相似历史工单检索 | 5s | 是 |
 | POST | `/internal/v1/tickets/export` | 生成工单 Excel 到 MinIO，返回预签名 URL | 10s | 是 |

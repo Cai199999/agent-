@@ -65,6 +65,7 @@ public class TicketService {
     private final NotificationService notificationService;
     private final TicketVectorService ticketVectorService;
     private final UserProfileService userProfileService;
+    private final AttachmentService attachmentService;
     private final ObjectMapper objectMapper;
     private final AuditPort auditPort;
 
@@ -77,6 +78,7 @@ public class TicketService {
                          NotificationService notificationService,
                          TicketVectorService ticketVectorService,
                          UserProfileService userProfileService,
+                         AttachmentService attachmentService,
                          ObjectMapper objectMapper,
                          AuditPort auditPort) {
         this.ticketMapper = ticketMapper;
@@ -88,6 +90,7 @@ public class TicketService {
         this.notificationService = notificationService;
         this.ticketVectorService = ticketVectorService;
         this.userProfileService = userProfileService;
+        this.attachmentService = attachmentService;
         this.objectMapper = objectMapper;
         this.auditPort = auditPort;
     }
@@ -232,6 +235,33 @@ public class TicketService {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权查看该工单");
         }
         return detail(ticketId);
+    }
+
+    /**
+     * 内部工具可能传工单号或数字 ID；统一解析，避免 NumberFormatException 变成 500。
+     */
+    public TicketDetail detailInternalRef(String ref, long actorId, List<String> roles) {
+        if (!StringUtils.hasText(ref)) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "工单标识不能为空");
+        }
+        Long id = parseLongOrNull(ref.trim());
+        TicketEntity ticket;
+        if (id != null) {
+            ticket = ticketMapper.selectById(id);
+        } else {
+            ticket = ticketMapper.selectOne(Wrappers.<TicketEntity>lambdaQuery()
+                    .eq(TicketEntity::getTenantId, 0L)
+                    .eq(TicketEntity::getTicketNo, ref.trim())
+                    .isNull(TicketEntity::getDeletedAt)
+                    .last("LIMIT 1"));
+        }
+        if (ticket == null || ticket.getDeletedAt() != null) {
+            throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
+        }
+        if (!isPrivileged(roles) && !Objects.equals(ticket.getReporterId(), actorId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权查看该工单");
+        }
+        return detail(ticket.getId());
     }
 
     private boolean isPrivileged(List<String> roles) {
@@ -384,6 +414,9 @@ public class TicketService {
                 requireStatus(from, Set.of("PROCESSING"), "当前状态不可提交解决");
                 if (!StringUtils.hasText(request.serviceItemText())) {
                     throw new ApiException(ErrorCode.VALIDATION_ERROR, "服务项目不能为空");
+                }
+                if (!attachmentService.hasOnsiteImage(ticketId, userId)) {
+                    throw new ApiException(ErrorCode.VALIDATION_ERROR, "请先上传至少一张现场照片");
                 }
                 to = "PENDING_VERIFY";
                 resolvedAt = now;
@@ -723,6 +756,14 @@ public class TicketService {
             ));
         } catch (Exception e) {
             throw new ApiException(ErrorCode.SYS_INTERNAL_ERROR);
+        }
+    }
+
+    private Long parseLongOrNull(String value) {
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

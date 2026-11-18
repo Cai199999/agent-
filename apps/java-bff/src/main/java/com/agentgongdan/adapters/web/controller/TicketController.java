@@ -174,11 +174,14 @@ public class TicketController {
     }
 
     @PostMapping(value = "/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<AttachmentView> uploadAttachment(@PathVariable long id,
-                                                        @RequestParam("file") MultipartFile file) {
+    public ApiResponse<AttachmentView> uploadAttachment(
+            @PathVariable long id,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(defaultValue = "GENERAL") String type) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:update");
-        return ApiResponse.ok(attachmentService.upload(id, file, StpUtil.getLoginIdAsLong()));
+        return ApiResponse.ok(attachmentService.upload(
+                id, file, StpUtil.getLoginIdAsLong(), type));
     }
 
     @GetMapping("/{id}/attachments")

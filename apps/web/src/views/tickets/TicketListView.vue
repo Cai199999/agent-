@@ -266,7 +266,7 @@
             placeholder="选填：现场现象、已做处理、遗留问题"
           />
         </el-form-item>
-        <el-form-item label="现场照片">
+        <el-form-item label="现场照片" required>
           <input
             ref="resolveCameraInput"
             class="hidden-file"
@@ -277,7 +277,7 @@
             @change="onResolveCameraChange"
           />
           <el-button @click="triggerResolveCamera">拍摄照片</el-button>
-          <span class="upload-hint">已选 {{ resolveFiles.length }} 张（选填）</span>
+          <span class="upload-hint">已选 {{ resolveFiles.length }} 张（至少 1 张）</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1099,21 +1099,27 @@ function openCreate(): void {
   createVisible.value = true;
 }
 
-async function uploadTicketFiles(ticketId: string, files: File[]): Promise<void> {
+async function uploadTicketFiles(
+  ticketId: string,
+  files: File[],
+  type = "GENERAL",
+  strict = false,
+): Promise<void> {
   for (const file of files) {
     const form = new FormData();
     form.append("file", file);
     try {
-      const body = (await http.post(`/tickets/${ticketId}/attachments`, form)) as any;
+      const body = (await http.post(`/tickets/${ticketId}/attachments?type=${type}`, form)) as any;
       if (body.code !== 0) throw new Error(body.message);
     } catch (error: any) {
+      if (strict) throw error;
       ElMessage.warning(toErrorMessage(error, `图片 ${file.name} 上传失败`));
     }
   }
 }
 
 async function uploadCreateFiles(ticketId: string): Promise<void> {
-  await uploadTicketFiles(ticketId, createFiles.value);
+  await uploadTicketFiles(ticketId, createFiles.value, "USER");
 }
 
 async function createTicket(): Promise<void> {
@@ -1206,9 +1212,14 @@ async function submitResolve(): Promise<void> {
     ElMessage.warning("请填写服务项目");
     return;
   }
+  if (!resolveFiles.value.length) {
+    ElMessage.warning("请至少拍摄一张现场照片");
+    return;
+  }
   resolving.value = true;
   try {
     const row = resolveRow.value;
+    await uploadTicketFiles(row.id, resolveFiles.value, "ONSITE", true);
     const body = (await http.post(`/tickets/${row.id}/resolve`, {
       expectedVersion: row.version,
       serviceItemText: resolveForm.serviceItemText.trim(),
@@ -1216,9 +1227,6 @@ async function submitResolve(): Promise<void> {
       reason: resolveForm.onsiteSituation.trim() || "提交解决",
     })) as any;
     if (body.code !== 0) throw new Error(body.message);
-    if (resolveFiles.value.length) {
-      await uploadTicketFiles(row.id, resolveFiles.value);
-    }
     ElMessage.success("已提交解决");
     resolveVisible.value = false;
     await load();
