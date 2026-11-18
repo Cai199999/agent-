@@ -346,7 +346,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { http } from "@/api/http";
 import { useAuthStore } from "@/stores/auth";
@@ -476,6 +476,7 @@ const similarTickets = ref<SimilarTicket[]>([]);
 const similarLoading = ref(false);
 const aiAnalysis = ref<TicketAiAnalysis | null>(null);
 const analysisRunning = ref(false);
+const route = useRoute();
 const router = useRouter();
 const assignVisible = ref(false);
 const assignRow = ref<TicketSummary | null>(null);
@@ -902,7 +903,13 @@ async function addComment(): Promise<void> {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  if (route.query.create === "1") {
+    openCreate();
+    void router.replace({ path: "/tickets" });
+  }
+});
 </script>
 
 <style scoped>

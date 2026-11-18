@@ -1,5 +1,6 @@
 package com.agentgongdan.adapters.ai;
 
+import com.agentgongdan.app.ports.ai.AiAvailabilityPort;
 import com.agentgongdan.app.ports.ai.ChatStreamHandler;
 import com.agentgongdan.app.ports.ai.ChatStreamPort;
 import com.agentgongdan.domain.chat.ChatContextChunk;
@@ -37,15 +38,22 @@ public class PythonChatStreamAdapter implements ChatStreamPort {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final AiAvailabilityPort availability;
 
     public PythonChatStreamAdapter(@Qualifier("pythonStreamRestClient") RestClient restClient,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   AiAvailabilityPort availability) {
         this.restClient = restClient;
         this.objectMapper = objectMapper;
+        this.availability = availability;
     }
 
     @Override
     public void stream(ChatStreamCommand command, ChatStreamHandler handler) {
+        if (!availability.allow(AiAvailabilityPort.SCOPE_CHAT)) {
+            handler.onError("ai_unavailable", "AI 服务暂时不可用（自动熔断中）");
+            return;
+        }
         Map<String, Object> payload = buildPayload(command);
         try {
             restClient.post()
@@ -57,16 +65,20 @@ public class PythonChatStreamAdapter implements ChatStreamPort {
                     .exchange((request, response) -> {
                         int status = response.getStatusCode().value();
                         if (status < 200 || status >= 300) {
+                            availability.failure(AiAvailabilityPort.SCOPE_CHAT);
                             handler.onError("ai_unavailable", "AI 服务返回 " + status);
                             return null;
                         }
                         readStream(response.getBody(), handler);
+                        availability.success(AiAvailabilityPort.SCOPE_CHAT);
                         return null;
                     });
         } catch (ResourceAccessException e) {
+            availability.failure(AiAvailabilityPort.SCOPE_CHAT);
             handler.onError(isTimeout(e) ? "ai_llm_timeout" : "ai_unavailable",
                     isTimeout(e) ? "模型响应超时" : "AI 服务不可用");
         } catch (Exception e) {
+            availability.failure(AiAvailabilityPort.SCOPE_CHAT);
             handler.onError("ai_unavailable", "AI 服务调用失败");
         }
     }

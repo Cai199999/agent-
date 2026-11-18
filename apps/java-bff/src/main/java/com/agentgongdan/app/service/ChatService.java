@@ -85,6 +85,7 @@ public class ChatService {
     private final ChatStreamPort chatStreamPort;
     private final TriagePort triagePort;
     private final TriageService triageService;
+    private final RuleTriageService ruleTriageService;
     private final ChatToolCallService toolCallService;
     private final TaskExecutor chatStreamExecutor;
     private final AuditPort auditPort;
@@ -106,6 +107,7 @@ public class ChatService {
                        ChatStreamPort chatStreamPort,
                        TriagePort triagePort,
                        TriageService triageService,
+                       RuleTriageService ruleTriageService,
                        ChatToolCallService toolCallService,
                        @Qualifier("chatStreamExecutor") TaskExecutor chatStreamExecutor,
                        AuditPort auditPort,
@@ -126,6 +128,7 @@ public class ChatService {
         this.chatStreamPort = chatStreamPort;
         this.triagePort = triagePort;
         this.triageService = triageService;
+        this.ruleTriageService = ruleTriageService;
         this.toolCallService = toolCallService;
         this.chatStreamExecutor = chatStreamExecutor;
         this.auditPort = auditPort;
@@ -504,8 +507,9 @@ public class ChatService {
         try {
             result = triagePort.triage(traceId, command.messages());
         } catch (Exception e) {
-            log.warn("triage degraded, session={}, trace={}, reason={}", sessionId, traceId, e.getMessage());
-            return;
+            log.warn("triage degraded, using rule fallback, session={}, trace={}, reason={}",
+                    sessionId, traceId, e.getMessage());
+            result = ruleTriageService.fallback(command.messages());
         }
         if (result == null) {
             return;
@@ -518,6 +522,7 @@ public class ChatService {
             triageEvent.put("confidence", result.confidence());
             triageEvent.put("action", result.action());
             triageEvent.put("lowConfidence", result.lowConfidence());
+            triageEvent.put("degraded", "rule-fallback".equals(result.model()));
             send(emitter, frameId, "triage", triageEvent, cancelled);
 
             if ("CREATE_DRAFT".equals(result.action()) && result.draft() != null

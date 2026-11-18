@@ -1,5 +1,6 @@
 package com.agentgongdan.adapters.ai;
 
+import com.agentgongdan.app.ports.ai.AiAvailabilityPort;
 import com.agentgongdan.app.ports.ai.TriagePort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
@@ -29,15 +30,21 @@ public class PythonTriageAdapter implements TriagePort {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final AiAvailabilityPort availability;
 
     public PythonTriageAdapter(@Qualifier("pythonTriageRestClient") RestClient restClient,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               AiAvailabilityPort availability) {
         this.restClient = restClient;
         this.objectMapper = objectMapper;
+        this.availability = availability;
     }
 
     @Override
     public TriageResult triage(String traceId, List<ChatTurn> messages) {
+        if (!availability.allow(AiAvailabilityPort.SCOPE_TRIAGE)) {
+            throw new ApiException(ErrorCode.AI_UNAVAILABLE, "AI 分诊暂时不可用（自动熔断中）");
+        }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("trace_id", traceId);
         List<Map<String, Object>> items = new ArrayList<>();
@@ -58,11 +65,14 @@ public class PythonTriageAdapter implements TriagePort {
                     .retrieve()
                     .body(JsonNode.class);
         } catch (Exception e) {
+            availability.failure(AiAvailabilityPort.SCOPE_TRIAGE);
             throw new ApiException(ErrorCode.AI_UNAVAILABLE, "分诊服务不可用");
         }
         if (response == null) {
+            availability.failure(AiAvailabilityPort.SCOPE_TRIAGE);
             throw new ApiException(ErrorCode.AI_UNAVAILABLE, "分诊服务无响应");
         }
+        availability.success(AiAvailabilityPort.SCOPE_TRIAGE);
 
         Map<String, Object> entities = toMap(response.path("entities"));
         Map<String, Object> draft = response.path("draft").isNull() || response.path("draft").isMissingNode()

@@ -14,6 +14,7 @@ import com.agentgongdan.adapters.web.dto.KnowledgeDownloadView;
 import com.agentgongdan.adapters.web.dto.KnowledgeHitView;
 import com.agentgongdan.adapters.web.dto.KnowledgeSearchRequest;
 import com.agentgongdan.adapters.web.dto.PageResult;
+import com.agentgongdan.app.ports.ai.AiAvailabilityPort;
 import com.agentgongdan.app.ports.audit.AuditPort;
 import com.agentgongdan.app.ports.storage.ObjectStoragePort;
 import com.agentgongdan.common.error.ApiException;
@@ -61,6 +62,7 @@ public class KnowledgeService {
     private final BizSequenceMapper sequenceMapper;
     private final ObjectStoragePort storage;
     private final AuditPort auditPort;
+    private final AiAvailabilityPort availability;
     private final RestClient pythonRestClient;
     private final String embeddingModel;
     private final int embeddingDim;
@@ -76,6 +78,7 @@ public class KnowledgeService {
                             BizSequenceMapper sequenceMapper,
                             ObjectStoragePort storage,
                             AuditPort auditPort,
+                            AiAvailabilityPort availability,
                             @Qualifier("pythonRestClient") RestClient pythonRestClient,
                             @Value("${EMBEDDING_MODEL:BAAI/bge-m3}") String embeddingModel,
                             @Value("${EMBEDDING_DIM:1024}") int embeddingDim,
@@ -90,6 +93,7 @@ public class KnowledgeService {
         this.sequenceMapper = sequenceMapper;
         this.storage = storage;
         this.auditPort = auditPort;
+        this.availability = availability;
         this.pythonRestClient = pythonRestClient;
         this.embeddingModel = embeddingModel;
         this.embeddingDim = embeddingDim;
@@ -338,6 +342,9 @@ public class KnowledgeService {
             payload.put("category_code", request.categoryCode());
         }
 
+        if (!availability.allow(AiAvailabilityPort.SCOPE_RETRIEVAL)) {
+            throw new ApiException(ErrorCode.KB_VECTOR_STORE_ERROR);
+        }
         JsonNode response;
         try {
             response = pythonRestClient.post()
@@ -347,11 +354,14 @@ public class KnowledgeService {
                     .retrieve()
                     .body(JsonNode.class);
         } catch (Exception e) {
+            availability.failure(AiAvailabilityPort.SCOPE_RETRIEVAL);
             throw new ApiException(ErrorCode.KB_VECTOR_STORE_ERROR);
         }
         if (response == null) {
+            availability.failure(AiAvailabilityPort.SCOPE_RETRIEVAL);
             throw new ApiException(ErrorCode.KB_VECTOR_STORE_ERROR);
         }
+        availability.success(AiAvailabilityPort.SCOPE_RETRIEVAL);
 
         List<String> vectorIds = new ArrayList<>();
         List<Long> docIds = new ArrayList<>();

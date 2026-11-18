@@ -7,6 +7,7 @@ import com.agentgongdan.adapters.persistence.mapper.TicketEventMapper;
 import com.agentgongdan.adapters.persistence.mapper.TicketMapper;
 import com.agentgongdan.adapters.persistence.mapper.VectorObjectMapper;
 import com.agentgongdan.adapters.web.dto.SimilarTicketView;
+import com.agentgongdan.app.ports.ai.AiAvailabilityPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -43,6 +44,7 @@ public class TicketVectorService {
     private final VectorObjectMapper vectorObjectMapper;
     private final RestClient pythonRestClient;
     private final TaskExecutor ticketVectorExecutor;
+    private final AiAvailabilityPort availability;
     private final String vectorCollection;
 
     public TicketVectorService(TicketMapper ticketMapper,
@@ -50,6 +52,7 @@ public class TicketVectorService {
                                VectorObjectMapper vectorObjectMapper,
                                @Qualifier("pythonRestClient") RestClient pythonRestClient,
                                @Qualifier("ticketVectorExecutor") TaskExecutor ticketVectorExecutor,
+                               AiAvailabilityPort availability,
                                @Value("${MILVUS_COLLECTION_TICKET:agent_gongdan_ticket_bge_m3_1024_v1}")
                                String vectorCollection) {
         this.ticketMapper = ticketMapper;
@@ -57,6 +60,7 @@ public class TicketVectorService {
         this.vectorObjectMapper = vectorObjectMapper;
         this.pythonRestClient = pythonRestClient;
         this.ticketVectorExecutor = ticketVectorExecutor;
+        this.availability = availability;
         this.vectorCollection = vectorCollection;
     }
 
@@ -152,6 +156,10 @@ public class TicketVectorService {
         if (excludeTicketId != null) {
             payload.put("exclude_ticket_id", excludeTicketId);
         }
+        if (!availability.allow(AiAvailabilityPort.SCOPE_RETRIEVAL)) {
+            log.warn("similar tickets degraded, reason=ai circuit open");
+            return List.of();
+        }
         JsonNode response;
         try {
             response = pythonRestClient.post()
@@ -161,10 +169,16 @@ public class TicketVectorService {
                     .retrieve()
                     .body(JsonNode.class);
         } catch (Exception e) {
+            availability.failure(AiAvailabilityPort.SCOPE_RETRIEVAL);
             log.warn("similar tickets degraded, reason={}", e.getMessage());
             return List.of();
         }
-        if (response == null || response.path("hits").isEmpty()) {
+        if (response == null) {
+            availability.failure(AiAvailabilityPort.SCOPE_RETRIEVAL);
+            return List.of();
+        }
+        availability.success(AiAvailabilityPort.SCOPE_RETRIEVAL);
+        if (response.path("hits").isEmpty()) {
             return List.of();
         }
 

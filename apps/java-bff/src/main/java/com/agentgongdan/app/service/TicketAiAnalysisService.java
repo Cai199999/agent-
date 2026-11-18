@@ -8,6 +8,7 @@ import com.agentgongdan.adapters.web.dto.AnalysisCitationView;
 import com.agentgongdan.adapters.web.dto.KnowledgeHitView;
 import com.agentgongdan.adapters.web.dto.KnowledgeSearchRequest;
 import com.agentgongdan.adapters.web.dto.TicketAiAnalysisView;
+import com.agentgongdan.app.ports.ai.AiAvailabilityPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -49,17 +50,20 @@ public class TicketAiAnalysisService {
     private final KnowledgeService knowledgeService;
     private final RestClient analysisClient;
     private final ObjectMapper objectMapper;
+    private final AiAvailabilityPort availability;
 
     public TicketAiAnalysisService(TicketMapper ticketMapper,
                                    TicketAiAnalysisMapper analysisMapper,
                                    KnowledgeService knowledgeService,
                                    @Qualifier("pythonAnalysisRestClient") RestClient analysisClient,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   AiAvailabilityPort availability) {
         this.ticketMapper = ticketMapper;
         this.analysisMapper = analysisMapper;
         this.knowledgeService = knowledgeService;
         this.analysisClient = analysisClient;
         this.objectMapper = objectMapper;
+        this.availability = availability;
     }
 
     public TicketAiAnalysisView analyze(long ticketId, long userId) {
@@ -96,6 +100,9 @@ public class TicketAiAnalysisService {
         payload.put("ticket", ticketInfo);
         payload.put("context_chunks", chunks);
 
+        if (!availability.allow(AiAvailabilityPort.SCOPE_ANALYSIS)) {
+            throw new ApiException(ErrorCode.AI_UNAVAILABLE, "AI 分析服务暂时不可用（自动熔断中）");
+        }
         JsonNode response;
         try {
             response = analysisClient.post()
@@ -105,12 +112,15 @@ public class TicketAiAnalysisService {
                     .retrieve()
                     .body(JsonNode.class);
         } catch (Exception e) {
+            availability.failure(AiAvailabilityPort.SCOPE_ANALYSIS);
             log.warn("ticket analysis failed, ticket={}, reason={}", ticketId, e.getMessage());
             throw new ApiException(ErrorCode.AI_UNAVAILABLE, "AI 分析服务不可用");
         }
         if (response == null) {
+            availability.failure(AiAvailabilityPort.SCOPE_ANALYSIS);
             throw new ApiException(ErrorCode.AI_UNAVAILABLE, "AI 分析服务无响应");
         }
+        availability.success(AiAvailabilityPort.SCOPE_ANALYSIS);
 
         List<String> causes = readStrings(response.path("causes"));
         List<String> actions = readStrings(response.path("actions"));

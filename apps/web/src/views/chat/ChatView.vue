@@ -28,10 +28,20 @@
           <strong>{{ currentSession?.title || "AI 助手" }}</strong>
           <span class="muted session-no">{{ currentSession?.sessionNo || "" }}</span>
         </div>
-        <el-tag v-if="currentSession" size="small" :type="currentSession.status === 'ACTIVE' ? 'success' : 'info'">
-          {{ currentSession.status }}
-        </el-tag>
+        <div class="chat-head-actions">
+          <el-button size="small" plain @click="goCreateTicket">表单报修</el-button>
+          <el-tag v-if="currentSession" size="small" :type="currentSession.status === 'ACTIVE' ? 'success' : 'info'">
+            {{ currentSession.status }}
+          </el-tag>
+        </div>
       </div>
+
+      <el-alert v-if="aiDegraded" type="warning" :closable="false" show-icon class="ai-degraded">
+        <template #title>
+          AI 服务暂不可用，已自动降级；你仍可
+          <el-button link type="primary" @click="goCreateTicket">改用表单报修</el-button>
+        </template>
+      </el-alert>
 
       <div ref="messageListRef" v-loading="messagesLoading" class="message-list">
         <el-empty v-if="!currentSessionId" description="新建或选择会话开始提问" />
@@ -152,7 +162,8 @@
                 </el-collapse-item>
               </el-collapse>
               <div v-if="item.status === 'FAILED'" class="failed">
-                生成中断{{ item.errorCode ? `（${item.errorCode}）` : "" }}，可重新发送
+                <span>生成中断{{ item.errorCode ? `（${item.errorCode}）` : "" }}，可重新发送</span>
+                <el-button link type="primary" @click="goCreateTicket">改用表单报修</el-button>
               </div>
             </div>
           </div>
@@ -284,11 +295,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Delete } from "@element-plus/icons-vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import { getAiHealth } from "@/api/health";
 import {
   archiveChatSession,
   confirmToolCall,
@@ -309,6 +321,7 @@ import {
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 const route = useRoute();
+const router = useRouter();
 
 const sessions = ref<ChatSession[]>([]);
 const sessionsLoading = ref(false);
@@ -325,9 +338,24 @@ const liveToolCalls = ref<ChatToolCall[]>([]);
 const confirmingTriageId = ref("");
 const confirmingToolId = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
+const aiDegraded = ref(false);
 let abortController: AbortController | null = null;
+let aiHealthTimer: number | undefined;
 
 const currentSession = computed(() => sessions.value.find((item) => item.id === currentSessionId.value));
+
+async function loadAiHealth(): Promise<void> {
+  try {
+    const health = await getAiHealth();
+    aiDegraded.value = health.status !== "UP";
+  } catch {
+    // 健康检查失败不打扰用户；真正的对话失败会给出明确提示。
+  }
+}
+
+function goCreateTicket(): void {
+  void router.push({ path: "/tickets", query: { create: "1" } });
+}
 
 const quickCards = [
   { title: "查询工单", desc: "查看我的工单与进度", prompt: "帮我查一下我最近的工单" },
@@ -687,9 +715,14 @@ onMounted(() => {
     input.value = prompt.trim();
   }
   void loadSessions();
+  void loadAiHealth();
+  aiHealthTimer = window.setInterval(() => void loadAiHealth(), 30_000);
 });
 onBeforeUnmount(() => {
   abortController?.abort();
+  if (aiHealthTimer !== undefined) {
+    window.clearInterval(aiHealthTimer);
+  }
 });
 </script>
 
@@ -772,6 +805,14 @@ onBeforeUnmount(() => {
   padding: 12px 16px;
   border-bottom: 1px solid #ebeef5;
 }
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-degraded {
+  margin: 8px 16px 0;
+}
 .session-no {
   margin-left: 10px;
   font-size: 12px;
@@ -847,6 +888,10 @@ onBeforeUnmount(() => {
 }
 .failed {
   margin-top: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   color: #f56c6c;
   font-size: 12px;
 }
