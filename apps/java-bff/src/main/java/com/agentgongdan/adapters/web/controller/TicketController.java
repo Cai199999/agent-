@@ -13,6 +13,7 @@ import com.agentgongdan.adapters.web.dto.TicketDetail;
 import com.agentgongdan.adapters.web.dto.TicketSummary;
 import com.agentgongdan.adapters.web.dto.TransitionRequest;
 import com.agentgongdan.app.service.AttachmentService;
+import com.agentgongdan.app.service.TicketAccessService;
 import com.agentgongdan.app.service.TicketAiAnalysisService;
 import com.agentgongdan.app.service.TicketExportService;
 import com.agentgongdan.app.service.TicketService;
@@ -51,16 +52,23 @@ public class TicketController {
     private final TicketVectorService ticketVectorService;
     private final TicketAiAnalysisService ticketAiAnalysisService;
     private final TicketExportService ticketExportService;
+    private final TicketAccessService ticketAccessService;
 
     public TicketController(TicketService ticketService, AttachmentService attachmentService,
                             TicketVectorService ticketVectorService,
                             TicketAiAnalysisService ticketAiAnalysisService,
-                            TicketExportService ticketExportService) {
+                            TicketExportService ticketExportService,
+                            TicketAccessService ticketAccessService) {
         this.ticketService = ticketService;
         this.attachmentService = attachmentService;
         this.ticketVectorService = ticketVectorService;
         this.ticketAiAnalysisService = ticketAiAnalysisService;
         this.ticketExportService = ticketExportService;
+        this.ticketAccessService = ticketAccessService;
+    }
+
+    private void requireReadable(long ticketId) {
+        ticketAccessService.requireReadable(ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
     }
 
     @PostMapping
@@ -86,7 +94,10 @@ public class TicketController {
             @RequestParam(required = false) String endTime) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
-        Long mineUserId = mine ? StpUtil.getLoginIdAsLong() : null;
+        List<String> roles = StpUtil.getRoleList();
+        boolean privileged = roles.contains("ADMIN") || roles.contains("DISPATCHER")
+                || roles.contains("ENGINEER") || roles.contains("INSPECTOR");
+        Long mineUserId = (mine || !privileged) ? StpUtil.getLoginIdAsLong() : null;
         return ApiResponse.ok(ticketService.list(page, Math.min(pageSize, 100), status, keyword,
                 priorityCode, ticketTypeCode, assigneeId, mineUserId,
                 parseDbLocalTime(startTime), parseDbLocalTime(endTime)));
@@ -154,6 +165,7 @@ public class TicketController {
     public ApiResponse<TicketDetail> detail(@PathVariable long id) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.detail(id));
     }
 
@@ -161,6 +173,7 @@ public class TicketController {
     public ApiResponse<List<TicketCommentView>> comments(@PathVariable long id) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.listComments(id));
     }
 
@@ -169,6 +182,7 @@ public class TicketController {
                                                      @Valid @RequestBody CreateCommentRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.addComment(
                 id, request.content(), request.visibility(), StpUtil.getLoginIdAsLong()));
     }
@@ -180,6 +194,7 @@ public class TicketController {
             @RequestParam(defaultValue = "GENERAL") String type) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:update");
+        requireReadable(id);
         return ApiResponse.ok(attachmentService.upload(
                 id, file, StpUtil.getLoginIdAsLong(), type));
     }
@@ -188,6 +203,7 @@ public class TicketController {
     public ApiResponse<List<AttachmentView>> attachments(@PathVariable long id) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(attachmentService.list(id));
     }
 
@@ -196,6 +212,7 @@ public class TicketController {
                                               @PathVariable long attachmentId) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:update");
+        requireReadable(id);
         attachmentService.delete(id, attachmentId, StpUtil.getLoginIdAsLong());
         return ApiResponse.<Void>ok(null);
     }
@@ -276,6 +293,7 @@ public class TicketController {
     public ApiResponse<TicketAiAnalysisView> analyze(@PathVariable long id) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(ticketAiAnalysisService.analyze(id, StpUtil.getLoginIdAsLong()));
     }
 
@@ -283,7 +301,7 @@ public class TicketController {
     public ApiResponse<TicketAiAnalysisView> latestAnalysis(@PathVariable long id) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
-        ticketService.detail(id);
+        requireReadable(id);
         return ApiResponse.ok(ticketAiAnalysisService.latest(id));
     }
 
@@ -292,6 +310,7 @@ public class TicketController {
                                                         @RequestParam(defaultValue = "5") int topK) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        requireReadable(id);
         return ApiResponse.ok(ticketVectorService.similarForTicket(id, Math.min(Math.max(topK, 1), 20)));
     }
 

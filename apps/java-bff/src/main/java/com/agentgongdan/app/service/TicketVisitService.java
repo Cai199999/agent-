@@ -1,11 +1,17 @@
 package com.agentgongdan.app.service;
 
 import com.agentgongdan.adapters.persistence.entity.SysUserEntity;
+import com.agentgongdan.adapters.persistence.entity.TicketEntity;
 import com.agentgongdan.adapters.persistence.entity.TicketVisitEntity;
 import com.agentgongdan.adapters.persistence.mapper.SysUserMapper;
+import com.agentgongdan.adapters.persistence.mapper.TicketMapper;
 import com.agentgongdan.adapters.persistence.mapper.TicketVisitMapper;
 import com.agentgongdan.adapters.web.dto.AddTicketVisitRequest;
 import com.agentgongdan.adapters.web.dto.TicketVisitView;
+import com.agentgongdan.app.ports.audit.AuditPort;
+import com.agentgongdan.common.error.ApiException;
+import com.agentgongdan.common.error.ErrorCode;
+import com.agentgongdan.domain.audit.AuditEvent;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
@@ -26,11 +32,16 @@ public class TicketVisitService {
     private static final long TENANT = 0L;
 
     private final TicketVisitMapper visitMapper;
+    private final TicketMapper ticketMapper;
     private final SysUserMapper userMapper;
+    private final AuditPort auditPort;
 
-    public TicketVisitService(TicketVisitMapper visitMapper, SysUserMapper userMapper) {
+    public TicketVisitService(TicketVisitMapper visitMapper, TicketMapper ticketMapper,
+                              SysUserMapper userMapper, AuditPort auditPort) {
         this.visitMapper = visitMapper;
+        this.ticketMapper = ticketMapper;
         this.userMapper = userMapper;
+        this.auditPort = auditPort;
     }
 
     public List<TicketVisitView> list(long ticketId) {
@@ -52,6 +63,13 @@ public class TicketVisitService {
 
     @Transactional
     public TicketVisitView add(long ticketId, AddTicketVisitRequest request, long userId) {
+        TicketEntity ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null || ticket.getDeletedAt() != null) {
+            throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
+        }
+        if (!"CLOSED".equals(ticket.getStatusCode())) {
+            throw new ApiException(ErrorCode.TICKET_STATE_CONFLICT, "仅已关闭工单可登记回访");
+        }
         TicketVisitEntity entity = new TicketVisitEntity();
         entity.setId(IdWorker.getId());
         entity.setTenantId(TENANT);
@@ -67,6 +85,9 @@ public class TicketVisitService {
         entity.setCreatedBy(userId);
         entity.setUpdatedBy(userId);
         visitMapper.insert(entity);
+        auditPort.record(new AuditEvent(
+                userId, null, "TICKET_VISIT_ADD", "TICKET", String.valueOf(ticketId),
+                null, Map.of("visitId", String.valueOf(entity.getId())), "SUCCESS", null));
         SysUserEntity user = userMapper.selectById(userId);
         return toView(entity, Map.of(userId, user == null ? "" : user.getDisplayName()));
     }

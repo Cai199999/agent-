@@ -3,6 +3,7 @@ package com.agentgongdan.adapters.web.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.agentgongdan.adapters.web.dto.AddTicketVisitRequest;
 import com.agentgongdan.adapters.web.dto.TicketVisitView;
+import com.agentgongdan.app.service.TicketAccessService;
 import com.agentgongdan.app.service.TicketVisitService;
 import com.agentgongdan.common.api.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,15 +20,19 @@ import java.util.List;
 public class TicketVisitController {
 
     private final TicketVisitService visitService;
+    private final TicketAccessService accessService;
 
-    public TicketVisitController(TicketVisitService visitService) {
+    public TicketVisitController(TicketVisitService visitService,
+                                 TicketAccessService accessService) {
         this.visitService = visitService;
+        this.accessService = accessService;
     }
 
     @GetMapping
     public ApiResponse<List<TicketVisitView>> list(@PathVariable long ticketId) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:read");
+        accessService.requireReadable(ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
         return ApiResponse.ok(visitService.list(ticketId));
     }
 
@@ -36,6 +41,7 @@ public class TicketVisitController {
                                             @RequestBody AddTicketVisitRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:close");
+        accessService.requireReadable(ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
         return ApiResponse.ok(visitService.add(ticketId, request, StpUtil.getLoginIdAsLong()));
     }
 }

@@ -4,6 +4,8 @@ import com.agentgongdan.adapters.persistence.entity.TicketMaterialEntity;
 import com.agentgongdan.adapters.persistence.mapper.TicketMaterialMapper;
 import com.agentgongdan.adapters.web.dto.AddTicketMaterialRequest;
 import com.agentgongdan.adapters.web.dto.TicketMaterialView;
+import com.agentgongdan.app.ports.audit.AuditPort;
+import com.agentgongdan.domain.audit.AuditEvent;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
@@ -15,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class TicketMaterialService {
@@ -22,9 +25,11 @@ public class TicketMaterialService {
     private static final long TENANT = 0L;
 
     private final TicketMaterialMapper materialMapper;
+    private final AuditPort auditPort;
 
-    public TicketMaterialService(TicketMaterialMapper materialMapper) {
+    public TicketMaterialService(TicketMaterialMapper materialMapper, AuditPort auditPort) {
         this.materialMapper = materialMapper;
+        this.auditPort = auditPort;
     }
 
     public List<TicketMaterialView> list(long ticketId) {
@@ -51,6 +56,9 @@ public class TicketMaterialService {
         entity.setCreatedBy(userId);
         entity.setUpdatedBy(userId);
         materialMapper.insert(entity);
+        auditPort.record(new AuditEvent(
+                userId, null, "TICKET_MATERIAL_ADD", "TICKET", String.valueOf(ticketId),
+                null, Map.of("materialId", String.valueOf(entity.getId())), "SUCCESS", null));
         return toView(entity);
     }
 
