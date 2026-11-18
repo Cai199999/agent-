@@ -3,7 +3,7 @@
 > 项目：IT 运维工单智能 Agent（agent-gongdan）
 > 日期：2026-11-18
 > 适用对象：未来大项目 / Orchestrator / 其他 Agent
-> 当前版本：P2（Manifest 0.3.0 + 只读/写任务 + 确认令牌 + 任务持久化 + 取消 + 工单生命周期写能力）
+> 当前版本：P3（Manifest / Agent Card 0.4.0 + 只读/写任务 + 确认令牌 + 任务事件 + 附件上传 + 可观测字段）
 
 ---
 
@@ -58,7 +58,7 @@ GET /agent/v1/manifest
 {
   "agentId": "property-maintenance",
   "name": "物业报修与工单 Agent",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "protocol": "agent-task-v1",
   "taskEndpoint": "/agent/v1/tasks",
   "auth": {
@@ -117,6 +117,10 @@ POST /agent/v1/tasks
     "errorMessage": null,
     "traceId": "...",
     "latencyMs": 12,
+    "inputTokens": null,
+    "outputTokens": null,
+    "costMicros": null,
+    "executionMode": "SYNC",
     "createdAt": "2026-11-18T08:00:00Z"
   }
 }
@@ -136,7 +140,7 @@ GET /agent/v1/tasks/{taskId}
 
 ---
 
-## 6. P0 能力
+## 6. 能力清单
 
 | capability | input | 说明 |
 |---|---|---|
@@ -222,7 +226,67 @@ POST /agent/v1/tasks/{taskId}/cancel
 
 ---
 
-## 9. 调用方注意事项
+## 9. 任务事件（P3）
+
+```http
+GET /agent/v1/tasks/{taskId}/events
+```
+
+返回该任务的生命周期事件（按时间顺序），例如：
+
+```json
+{
+  "code": 0,
+  "data": [
+    {"status": "WAITING_CONFIRM", "detail": "等待人工确认", "createdAt": "..."},
+    {"status": "SUCCEEDED", "detail": "执行成功", "createdAt": "..."}
+  ]
+}
+```
+
+说明：
+
+- 仅同 Actor 可查询；
+- 当前为**落库事件历史查询**，不是 SSE / WebSocket 实时推送；
+- 状态包含 `WAITING_CONFIRM` / `SUCCEEDED` / `FAILED` / `CANCELLED` 等。
+
+---
+
+## 10. 附件上传（P3）
+
+`ticket.resolve` 要求至少一张 `ONSITE` 现场照片，因此子 Agent 需要先上传：
+
+```http
+POST /agent/v1/tickets/{ticketId}/attachments?type=ONSITE
+Content-Type: multipart/form-data
+
+file=@onsite.png
+```
+
+| type | 用途 | 权限 |
+|---|---|---|
+| `ONSITE` | 处理人现场照片 | 必须是该工单处理人 |
+| `USER` | 报修人图片 | 工单可读 |
+| `GENERAL` | 一般附件 | 工单可读 |
+
+返回附件 ID、类型、预签名 URL。上传成功后再提交 `ticket.resolve`。
+
+---
+
+## 11. Agent Card 发现（P3）
+
+```http
+GET /.well-known/agent-card.json
+GET /agent-card.json
+GET /agent/v1/card
+```
+
+返回 Agent 名称、描述、版本、协议版本、skills、securitySchemes 等发现信息。
+当前为 A2A 风格的最小发现端点，未实现完整 A2A 注册中心与委托鉴权。
+
+---
+
+## 12. 调用方注意事项
 
 1. 不要传全量聊天历史，只传任务 brief 与必要引用；
 2. 不要传原始内部 Token 给最终用户；
@@ -233,7 +297,7 @@ POST /agent/v1/tasks/{taskId}/cancel
 
 ---
 
-## 10. 示例
+## 13. 示例
 
 ```bash
 curl -X POST http://127.0.0.1:8200/agent/v1/tasks \
@@ -249,12 +313,14 @@ curl -X POST http://127.0.0.1:8200/agent/v1/tasks \
 
 ---
 
-## 11. 当前限制
+## 14. 当前限制
 
-- 无异步任务队列/事件流；
-- 未记录 token/成本字段；
-- 未独立部署；
+- 无异步任务队列 / Worker；任务在请求内同步执行；
+- 任务事件为落库历史查询，暂无 SSE / WebSocket 实时推送；
+- `inputTokens` / `outputTokens` / `costMicros` 字段已预留，当前任务执行不产生真实 LLM 计量；
+- 未独立部署，仍与 Java BFF 同进程；
+- 未实现完整 A2A 协议注册中心与委托鉴权，仅提供 Agent Card 发现端点；
 - 未提供 SDK，直接 HTTP 调用；
-- 写能力目前只有建单/导出。
+- 浏览器 E2E 未覆盖附件上传 + 解决全链路。
 
 后续按 `07-子Agent服务化改造方案与阶段目标.md` 的 Stage 2–5 演进。

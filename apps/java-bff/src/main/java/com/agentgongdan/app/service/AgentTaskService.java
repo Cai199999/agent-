@@ -1,9 +1,12 @@
 package com.agentgongdan.app.service;
 
 import com.agentgongdan.adapters.persistence.entity.AgentTaskEntity;
+import com.agentgongdan.adapters.persistence.entity.AgentTaskEventEntity;
+import com.agentgongdan.adapters.persistence.mapper.AgentTaskEventMapper;
 import com.agentgongdan.adapters.persistence.mapper.AgentTaskMapper;
 import com.agentgongdan.adapters.web.dto.AddTicketMaterialRequest;
 import com.agentgongdan.adapters.web.dto.AddTicketVisitRequest;
+import com.agentgongdan.adapters.web.dto.AgentTaskEventView;
 import com.agentgongdan.adapters.web.dto.AgentTaskRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskView;
 import com.agentgongdan.adapters.web.dto.CreateTicketRequest;
@@ -46,6 +49,7 @@ public class AgentTaskService {
     private final TicketMaterialService ticketMaterialService;
     private final TicketVisitService ticketVisitService;
     private final AgentTaskMapper taskMapper;
+    private final AgentTaskEventMapper eventMapper;
     private final ObjectMapper objectMapper;
 
     public AgentTaskService(TicketService ticketService,
@@ -56,6 +60,7 @@ public class AgentTaskService {
                             TicketMaterialService ticketMaterialService,
                             TicketVisitService ticketVisitService,
                             AgentTaskMapper taskMapper,
+                            AgentTaskEventMapper eventMapper,
                             ObjectMapper objectMapper) {
         this.ticketService = ticketService;
         this.knowledgeService = knowledgeService;
@@ -65,6 +70,7 @@ public class AgentTaskService {
         this.ticketMaterialService = ticketMaterialService;
         this.ticketVisitService = ticketVisitService;
         this.taskMapper = taskMapper;
+        this.eventMapper = eventMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -72,7 +78,7 @@ public class AgentTaskService {
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("agentId", AGENT_ID);
         manifest.put("name", "物业报修与工单 Agent");
-        manifest.put("version", "0.3.0");
+        manifest.put("version", "0.4.0");
         manifest.put("protocol", "agent-task-v1");
         manifest.put("taskEndpoint", "/agent/v1/tasks");
         manifest.put("auth", Map.of("type", "internal-token", "header", "X-Internal-Token"));
@@ -97,6 +103,27 @@ public class AgentTaskService {
                 capability("ticket.visit.add", "登记回访", "ticket:close", true, "WRITE")
         ));
         return manifest;
+    }
+
+    public Map<String, Object> agentCard() {
+        Map<String, Object> card = new LinkedHashMap<>();
+        card.put("name", "Property Maintenance Agent");
+        card.put("description", "物业报修、工单流转、现场处理、知识检索与导出子 Agent");
+        card.put("url", "http://127.0.0.1:8200/agent/v1");
+        card.put("version", "0.4.0");
+        card.put("protocolVersion", "agent-task-v1");
+        card.put("capabilities", Map.of(
+                "streaming", false,
+                "pushNotifications", false,
+                "stateTransitionHistory", true
+        ));
+        card.put("defaultInputModes", List.of("application/json"));
+        card.put("defaultOutputModes", List.of("application/json"));
+        card.put("skills", manifest().get("capabilities"));
+        card.put("securitySchemes", Map.of(
+                "internalToken", Map.of("type", "apiKey", "in", "header", "name", "X-Internal-Token")
+        ));
+        return card;
     }
 
     public AgentTaskView submit(AgentTaskRequest request, long actorId,
@@ -129,6 +156,7 @@ public class AgentTaskService {
         entity.setClientTaskId(clientTaskId);
         entity.setInputJson(toJson(request.input() == null ? Map.of() : request.input()));
         entity.setTraceId(traceId);
+        entity.setExecutionMode("SYNC");
         entity.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         entity.setUpdatedAt(entity.getCreatedAt());
 
@@ -157,6 +185,7 @@ public class AgentTaskService {
             }
             throw e;
         }
+        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
         return toView(entity);
     }
 
@@ -183,7 +212,29 @@ public class AgentTaskService {
         entity.setConfirmationExpiresAt(null);
         entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         taskMapper.updateById(entity);
+        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
         return toView(entity);
+    }
+
+    public List<AgentTaskEventView> events(String taskId, long actorId) {
+        AgentTaskEntity task = find(taskId);
+        if (!task.getActorId().equals(actorId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权访问该任务");
+        }
+        return eventMapper.selectList(Wrappers.<AgentTaskEventEntity>lambdaQuery()
+                        .eq(AgentTaskEventEntity::getTenantId, TENANT)
+                        .eq(AgentTaskEventEntity::getTaskId, taskId)
+                        .orderByAsc(AgentTaskEventEntity::getId))
+                .stream()
+                .map(item -> new AgentTaskEventView(
+                        String.valueOf(item.getId()),
+                        item.getTaskId(),
+                        item.getStatus(),
+                        item.getMessage(),
+                        item.getCreatedAt() == null ? null
+                                : item.getCreatedAt().atOffset(ZoneOffset.UTC)
+                                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)))
+                .toList();
     }
 
     public AgentTaskView confirm(String taskId, String confirmationToken,
@@ -213,6 +264,7 @@ public class AgentTaskService {
         entity.setConfirmationToken(null);
         entity.setConfirmationExpiresAt(null);
         taskMapper.updateById(entity);
+        recordEvent(taskId, entity.getStatus(), entity.getErrorMessage());
         return toView(entity);
     }
 
@@ -438,6 +490,10 @@ public class AgentTaskService {
                 entity.getErrorMessage(),
                 entity.getTraceId(),
                 entity.getLatencyMs() == null ? 0 : entity.getLatencyMs(),
+                entity.getInputTokens(),
+                entity.getOutputTokens(),
+                entity.getCostMicros(),
+                entity.getExecutionMode() == null ? "SYNC" : entity.getExecutionMode(),
                 entity.getConfirmationToken(),
                 entity.getConfirmationExpiresAt() == null ? null
                         : entity.getConfirmationExpiresAt().atOffset(ZoneOffset.UTC)
@@ -564,6 +620,17 @@ public class AgentTaskService {
                 return null;
             }
         }
+    }
+
+    private void recordEvent(String taskId, String status, String message) {
+        AgentTaskEventEntity event = new AgentTaskEventEntity();
+        event.setId(IdWorker.getId());
+        event.setTenantId(TENANT);
+        event.setTaskId(taskId);
+        event.setStatus(status);
+        event.setMessage(message);
+        event.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
+        eventMapper.insert(event);
     }
 
     private String toJson(Object value) {

@@ -563,12 +563,16 @@
 |---|---|---|---|
 | GET | `/agent/v1/manifest` | Agent Card/能力清单 | 内部令牌 |
 | GET | `/agent/v1/capabilities` | 能力清单别名 | 内部令牌 |
-| POST | `/agent/v1/tasks` | 提交只读/写任务 | `ticket.query` / `ticket.detail` / `ticket.similar` / `knowledge.search` / `ticket.create` / `ticket.export` |
+| GET | `/agent/v1/card` | Agent Card | 内部令牌 |
+| GET | `/.well-known/agent-card.json`、`/agent-card.json` | A2A 风格发现端点 | 公开（不含密钥） |
+| POST | `/agent/v1/tasks` | 提交只读/写任务 | 见 Manifest 能力清单 |
 | GET | `/agent/v1/tasks/{taskId}` | 查询任务结果 | 内部令牌 + 同 Actor |
+| GET | `/agent/v1/tasks/{taskId}/events` | 任务生命周期事件 | 内部令牌 + 同 Actor |
 | POST | `/agent/v1/tasks/{taskId}/confirm` | 确认写任务 | 同 Actor + `confirmationToken` |
 | POST | `/agent/v1/tasks/{taskId}/cancel` | 取消任务 | 同 Actor |
+| POST | `/agent/v1/tickets/{ticketId}/attachments?type=ONSITE\|USER\|GENERAL` | 子 Agent 上传附件/现场照片 | 内部令牌；ONSITE 需处理人 |
 
-P2 已实现：`agent_task` 持久化、建单/导出/派单/接单/解决/验证/关闭/取消/挂起/恢复/结束/评论/材料/回访、10 分钟一次性确认令牌、任务取消。异步/成本字段待补。
+P3 已实现：`agent_task` 持久化、全部工单生命周期写能力、10 分钟一次性确认令牌、任务取消、任务事件历史、附件上传、token/成本预留字段、Agent Card 发现。异步队列/实时事件流、独立部署、完整 A2A 注册与委托鉴权待补。
 
 ---
 

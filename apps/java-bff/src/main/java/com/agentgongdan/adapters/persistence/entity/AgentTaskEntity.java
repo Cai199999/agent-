@@ -28,6 +28,10 @@ public class AgentTaskEntity {
     private LocalDateTime confirmationExpiresAt;
     private String traceId;
     private Integer latencyMs;
+    private Integer inputTokens;
+    private Integer outputTokens;
+    private Long costMicros;
+    private String executionMode;
     private LocalDateTime confirmedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

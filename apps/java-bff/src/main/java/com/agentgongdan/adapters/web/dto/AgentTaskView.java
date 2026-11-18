@@ -10,6 +10,10 @@ public record AgentTaskView(
         String errorMessage,
         String traceId,
         long latencyMs,
+        Integer inputTokens,
+        Integer outputTokens,
+        Long costMicros,
+        String executionMode,
         String confirmationToken,
         String confirmationExpiresAt,
         String createdAt

@@ -452,6 +452,38 @@ apps/python-ai/.venv/bin/python scripts/e2e/agent_p2_smoke.py
 
 仍未做：异步任务、事件流、token/成本、独立部署、附件上传工具。
 
+### 9.7 P3 实现记录（2026-11-18）
+
+- Manifest / Agent Card 升级至 `0.4.0`；
+- 新增附件上传：`POST /agent/v1/tickets/{ticketId}/attachments?type=ONSITE|USER|GENERAL`，打通“上传现场照片 → `ticket.resolve`”闭环；
+- `ONSITE` 上传复用 `TicketAccessService.requireHandler`，其余类型要求可读；
+- 新增任务事件查询：`GET /agent/v1/tasks/{taskId}/events`，记录 `WAITING_CONFIRM` / `SUCCEEDED` / `FAILED` / `CANCELLED` 等生命周期；
+- `V17__add_agent_task_observability_and_events.sql`：
+  - `agent_task` 增加 `input_tokens`、`output_tokens`、`cost_micros`、`execution_mode`；
+  - 新增 `agent_task_event`；
+- 新增 A2A 风格发现端点：
+  - `GET /.well-known/agent-card.json`
+  - `GET /agent-card.json`
+  - Agent Card 暴露 skills、securitySchemes，不暴露密钥；
+- 任务响应增加 `inputTokens` / `outputTokens` / `costMicros` / `executionMode`；
+- 新增 `scripts/e2e/agent_p3_smoke.py`。
+
+验证：
+
+```bash
+apps/python-ai/.venv/bin/python scripts/e2e/agent_p3_smoke.py
+# card + create + assign + accept + attachment + resolve + events
+```
+
+**P3 仍属“同步任务 + 事件历史”，不是完整异步事件流：**
+
+- 无独立任务队列 / Worker；
+- 无 SSE / WebSocket 推送，`events` 为落库历史查询；
+- token / cost 字段已预留，当前任务执行不产生真实 LLM 计量，值为空或 0；
+- 未独立部署，仍与 BFF 同进程；
+- 未实现完整 A2A 协议注册/发现中心与委托鉴权，仅提供 Agent Card 形状的发现端点；
+- 浏览器 E2E 未覆盖“附件上传 → 解决”全链路。
+
 ---
 
 ## 10. 结论
