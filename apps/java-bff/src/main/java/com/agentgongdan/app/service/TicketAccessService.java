@@ -35,6 +35,31 @@ public class TicketAccessService {
         return ticket;
     }
 
+    public TicketEntity requireHandler(long ticketId, long userId, List<String> roles) {
+        TicketEntity ticket = requireReadable(ticketId, userId, roles);
+        if (!isPrivileged(roles) && !Objects.equals(ticket.getAssigneeId(), userId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "仅当前处理人可执行该操作");
+        }
+        return ticket;
+    }
+
+    public TicketEntity requireHandlerOrUnassigned(long ticketId, long userId, List<String> roles) {
+        TicketEntity ticket = requireReadable(ticketId, userId, roles);
+        if (!isPrivileged(roles) && ticket.getAssigneeId() != null
+                && !Objects.equals(ticket.getAssigneeId(), userId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "该工单已派给其他处理人");
+        }
+        return ticket;
+    }
+
+    public TicketEntity requireReporterOrPrivileged(long ticketId, long userId, List<String> roles) {
+        TicketEntity ticket = requireReadable(ticketId, userId, roles);
+        if (!isPrivileged(roles) && !Objects.equals(ticket.getReporterId(), userId)) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "仅报障人可执行该操作");
+        }
+        return ticket;
+    }
+
     public boolean isPrivileged(List<String> roles) {
         if (roles == null) {
             return false;

@@ -71,6 +71,20 @@ public class TicketController {
         ticketAccessService.requireReadable(ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
     }
 
+    private void requireHandler(long ticketId) {
+        ticketAccessService.requireHandler(ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
+    }
+
+    private void requireHandlerOrUnassigned(long ticketId) {
+        ticketAccessService.requireHandlerOrUnassigned(
+                ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
+    }
+
+    private void requireReporterOrPrivileged(long ticketId) {
+        ticketAccessService.requireReporterOrPrivileged(
+                ticketId, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList());
+    }
+
     @PostMapping
     public ApiResponse<TicketDetail> create(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -222,6 +236,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:assign");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.transition(id, "assign", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -230,6 +245,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:handle");
+        requireHandlerOrUnassigned(id);
         return ApiResponse.ok(ticketService.transition(id, "accept", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -238,6 +254,7 @@ public class TicketController {
                                              @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:handle");
+        requireHandler(id);
         return ApiResponse.ok(ticketService.transition(id, "resolve", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -246,6 +263,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:verify");
+        requireReporterOrPrivileged(id);
         return ApiResponse.ok(ticketService.transition(id, "verify", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -254,6 +272,7 @@ public class TicketController {
                                            @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:close");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.transition(id, "close", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -262,6 +281,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:close");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.transition(id, "cancel", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -270,6 +290,7 @@ public class TicketController {
                                           @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:handle");
+        requireHandler(id);
         return ApiResponse.ok(ticketService.transition(id, "hold", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -278,6 +299,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:handle");
+        requireHandler(id);
         return ApiResponse.ok(ticketService.transition(id, "resume", request, StpUtil.getLoginIdAsLong()));
     }
 
@@ -286,6 +308,7 @@ public class TicketController {
                                             @Valid @RequestBody TransitionRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("ticket:close");
+        requireReadable(id);
         return ApiResponse.ok(ticketService.transition(id, "finish", request, StpUtil.getLoginIdAsLong()));
     }
 
