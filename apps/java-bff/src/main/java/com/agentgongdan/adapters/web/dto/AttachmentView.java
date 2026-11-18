@@ -7,6 +7,7 @@ public record AttachmentView(
         String contentType,
         Long sizeBytes,
         String uploadedBy,
+        String attachmentType,
         String createdAt,
         String url
 ) {

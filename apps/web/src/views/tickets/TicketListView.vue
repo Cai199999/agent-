@@ -504,6 +504,9 @@
           <el-divider content-position="left">附件</el-divider>
           <div v-if="attachments.length === 0" class="empty-comments">暂无附件</div>
           <div v-for="att in attachments" :key="att.id" class="attachment-item">
+            <el-tag v-if="att.attachmentType" size="small" effect="plain">
+              {{ att.attachmentType === "ONSITE" ? "现场照片" : att.attachmentType === "USER" ? "报修图片" : "附件" }}
+            </el-tag>
             <a :href="att.url || '#'" target="_blank" rel="noopener">{{ att.originalName }}</a>
             <span class="attachment-meta">
               {{ formatSize(att.sizeBytes) }} · {{ formatTime(att.createdAt) }}
@@ -675,6 +678,7 @@ interface Attachment {
   contentType?: string;
   sizeBytes: number;
   uploadedBy?: string;
+  attachmentType?: string | null;
   createdAt?: string;
   url?: string;
 }
@@ -1099,23 +1103,39 @@ function openCreate(): void {
   createVisible.value = true;
 }
 
+async function deleteAttachments(ticketId: string, attachmentIds: string[]): Promise<void> {
+  for (const attachmentId of attachmentIds) {
+    try {
+      await http.delete(`/tickets/${ticketId}/attachments/${attachmentId}`);
+    } catch (error: any) {
+      ElMessage.warning(toErrorMessage(error, "临时图片清理失败，请手动删除"));
+    }
+  }
+}
+
 async function uploadTicketFiles(
   ticketId: string,
   files: File[],
   type = "GENERAL",
   strict = false,
-): Promise<void> {
+): Promise<string[]> {
+  const uploaded: string[] = [];
   for (const file of files) {
     const form = new FormData();
     form.append("file", file);
     try {
       const body = (await http.post(`/tickets/${ticketId}/attachments?type=${type}`, form)) as any;
       if (body.code !== 0) throw new Error(body.message);
+      if (body.data?.id) uploaded.push(String(body.data.id));
     } catch (error: any) {
-      if (strict) throw error;
+      if (strict) {
+        await deleteAttachments(ticketId, uploaded);
+        throw error;
+      }
       ElMessage.warning(toErrorMessage(error, `图片 ${file.name} 上传失败`));
     }
   }
+  return uploaded;
 }
 
 async function uploadCreateFiles(ticketId: string): Promise<void> {
@@ -1217,9 +1237,10 @@ async function submitResolve(): Promise<void> {
     return;
   }
   resolving.value = true;
+  const row = resolveRow.value;
+  let uploaded: string[] = [];
   try {
-    const row = resolveRow.value;
-    await uploadTicketFiles(row.id, resolveFiles.value, "ONSITE", true);
+    uploaded = await uploadTicketFiles(row.id, resolveFiles.value, "ONSITE", true);
     const body = (await http.post(`/tickets/${row.id}/resolve`, {
       expectedVersion: row.version,
       serviceItemText: resolveForm.serviceItemText.trim(),
@@ -1234,6 +1255,9 @@ async function submitResolve(): Promise<void> {
       await openDetail(row);
     }
   } catch (error: any) {
+    if (uploaded.length) {
+      await deleteAttachments(row.id, uploaded);
+    }
     ElMessage.error(toErrorMessage(error, "提交解决失败"));
   } finally {
     resolving.value = false;

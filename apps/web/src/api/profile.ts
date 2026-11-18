@@ -7,6 +7,22 @@ export interface UserProfile {
   buildingId?: string | null;
   roomId?: string | null;
   customerId?: string | null;
+  reviewStatus?: "UNSET" | "PENDING" | "APPROVED" | "REJECTED" | string | null;
+  reviewRemark?: string | null;
+}
+
+export interface ProfileReview {
+  userId: string;
+  username?: string | null;
+  displayName?: string | null;
+  contactName?: string | null;
+  phoneMask?: string | null;
+  projectId?: string | null;
+  buildingId?: string | null;
+  roomId?: string | null;
+  customerId?: string | null;
+  reviewStatus: string;
+  createdAt?: string | null;
 }
 
 export interface UpdateUserProfile {
@@ -28,4 +44,19 @@ export async function updateProfile(payload: UpdateUserProfile): Promise<UserPro
   const body = (await http.put("/profile", payload)) as any;
   if (body.code !== 0) throw new Error(body.message);
   return body.data || {};
+}
+
+export async function listPendingProfiles(): Promise<ProfileReview[]> {
+  const body = (await http.get("/profile/reviews")) as any;
+  if (body.code !== 0) throw new Error(body.message);
+  return body.data || [];
+}
+
+export async function reviewProfile(
+  userId: string,
+  approved: boolean,
+  remark?: string,
+): Promise<void> {
+  const body = (await http.post(`/profile/reviews/${userId}`, { approved, remark })) as any;
+  if (body.code !== 0) throw new Error(body.message);
 }

@@ -6,6 +6,8 @@ public record UserProfileView(
         String projectId,
         String buildingId,
         String roomId,
-        String customerId
+        String customerId,
+        String reviewStatus,
+        String reviewRemark
 ) {
 }

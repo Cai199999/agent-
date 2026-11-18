@@ -211,6 +211,7 @@ public class AttachmentService {
                 file.getContentType(),
                 file.getSizeBytes(),
                 String.valueOf(attachment.getCreatedBy()),
+                attachment.getAttachmentType(),
                 file.getCreatedAt() == null ? null
                         : file.getCreatedAt().atOffset(ZoneOffset.UTC)
                         .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),

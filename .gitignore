@@ -29,6 +29,10 @@ run/
 *.log
 *.pid
 
+# Playwright 产物
+apps/web/test-results/
+apps/web/playwright-report/
+
 # IDE / OS
 .idea/
 .vscode/

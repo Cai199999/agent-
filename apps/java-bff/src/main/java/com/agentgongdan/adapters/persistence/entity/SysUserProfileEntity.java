@@ -22,6 +22,10 @@ public class SysUserProfileEntity {
     private Long roomId;
     private Long customerId;
     private String status;
+    private String reviewStatus;
+    private String reviewRemark;
+    private Long reviewedBy;
+    private LocalDateTime reviewedAt;
     private LocalDateTime createdAt;
     private Long createdBy;
     private LocalDateTime updatedAt;
