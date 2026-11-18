@@ -5,6 +5,7 @@
 """
 
 import json
+from datetime import datetime
 from typing import Any
 
 from adapters.gateways.java_internal_client import JavaInternalClient, JavaInternalError
@@ -31,6 +32,8 @@ class ToolExecutorImpl:
         try:
             if call.name == "ticket_query":
                 return await self._ticket_query(call.tool_call_id, arguments, actor, trace_id)
+            if call.name == "ticket_export":
+                return self._ticket_export(call.tool_call_id, arguments)
             if call.name == "ticket_detail":
                 return await self._ticket_detail(call.tool_call_id, arguments, actor, trace_id)
             if call.name == "ticket_similar":
@@ -124,6 +127,92 @@ class ToolExecutorImpl:
             message=f"命中 {len(compact)} 条知识",
         )
 
+    def _ticket_export(self, call_id: str, args: dict) -> ToolResult:
+        """只生成导出草稿，不生成文件；由用户确认后由 Java 执行。"""
+        start_raw = self._text(args.get("start_time"))
+        end_raw = self._text(args.get("end_time"))
+        try:
+            start = self._parse_iso(start_raw)
+            end = self._parse_iso(end_raw)
+        except ValueError:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="时间范围必须是带时区的 ISO 8601，例如 2026-11-10T00:00:00+08:00")
+        if start is None or end is None:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="导出必须提供 start_time 和 end_time")
+        if end <= start:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="end_time 必须晚于 start_time")
+        status = self._text(args.get("status")).upper() or None
+        ticket_type = self._text(args.get("ticket_type_code")).upper() or None
+        priority = self._text(args.get("priority_code")).upper() or None
+        if ticket_type and ticket_type not in VALID_TICKET_TYPES:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="不支持的工单类型")
+        if priority and priority not in VALID_PRIORITIES:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="不支持的优先级")
+        filters = {
+            "start_time": start.isoformat(),
+            "end_time": end.isoformat(),
+            "status": status,
+            "ticket_type_code": ticket_type,
+            "priority_code": priority,
+            "keyword": self._text(args.get("keyword")) or None,
+            "location": self._text(args.get("location")) or None,
+        }
+        summary = self._export_summary(filters)
+        return ToolResult(
+            call_id, True,
+            data={"state": "CONFIRM_REQUIRED", "filters": filters, "summary": summary},
+            message=summary,
+        )
+
+    @staticmethod
+    def _parse_iso(value: str) -> datetime | None:
+        text = (value or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            raise ValueError("timezone required")
+        return parsed
+
+    @staticmethod
+    def _export_summary(filters: dict) -> str:
+        def short(value: str | None) -> str:
+            if not value:
+                return ""
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                return value
+
+        parts = [f"将导出 {short(filters.get('start_time'))} 至 {short(filters.get('end_time'))} 的工单"]
+        labels = {
+            "ELEVATOR": "电梯故障",
+            "HVAC": "空调故障",
+            "PUMP": "水泵故障",
+            "FIRE": "消防故障",
+            "ACCESS": "门禁故障",
+            "NETWORK": "网络故障",
+            "ELECTRICAL": "电气故障",
+            "GENERAL": "通用",
+        }
+        if filters.get("ticket_type_code"):
+            parts.append(f"类型：{labels.get(filters['ticket_type_code'], filters['ticket_type_code'])}")
+        if filters.get("status"):
+            parts.append(f"状态：{filters['status']}")
+        if filters.get("priority_code"):
+            parts.append(f"优先级：{filters['priority_code']}")
+        if filters.get("location"):
+            parts.append(f"位置：{filters['location']}")
+        if filters.get("keyword"):
+            parts.append(f"关键词：{filters['keyword']}")
+        return "，".join(parts) + "。确认后生成 Excel。"
+
     async def _ticket_detail(self, call_id: str, args: dict, actor: dict,
                              trace_id: str | None) -> ToolResult:
         ticket_id = self._text(args.get("ticket_id"))
@@ -185,6 +274,8 @@ class ToolExecutorImpl:
         if name == "ticket_query":
             return f"状态={args.get('status') or '全部'}，关键词={args.get('keyword') or '无'}，" \
                    f"条数={args.get('limit') or 5}"
+        if name == "ticket_export":
+            return f"导出范围={args.get('start_time') or '?'} ~ {args.get('end_time') or '?'}"
         if name == "ticket_detail":
             return f"工单={args.get('ticket_id') or '未指定'}"
         if name == "ticket_similar":

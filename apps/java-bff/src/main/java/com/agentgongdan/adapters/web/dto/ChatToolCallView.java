@@ -12,6 +12,9 @@ public record ChatToolCallView(
         String argumentsSummary,
         String resultSummary,
         String resultTicketId,
+        String resultUrl,
+        String resultFilename,
+        Integer resultRowCount,
         String errorCode
 ) {
 }

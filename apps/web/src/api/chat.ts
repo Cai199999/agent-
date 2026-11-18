@@ -65,6 +65,9 @@ export interface ChatToolCall {
   argumentsSummary?: string | null;
   resultSummary?: string | null;
   resultTicketId?: string | null;
+  resultUrl?: string | null;
+  resultFilename?: string | null;
+  resultRowCount?: number | null;
   errorCode?: string | null;
   hidden?: boolean;
 }
@@ -93,6 +96,7 @@ export interface ChatStreamHandlers {
   onTriage?: (data: any) => void;
   onTicketCard?: (card: TicketCard) => void;
   onToolCall?: (tool: ChatToolCall) => void;
+  onExportCard?: (data: any) => void;
   onDone?: (data: any) => void;
   onErrorEvent?: (data: any) => void;
 }
@@ -139,6 +143,14 @@ export async function confirmToolCall(
   const body = (await http.post(`/chat/tool-calls/${id}/confirm`, {})) as any;
   if (body.code !== 0) throw new Error(body.message);
   return body.data.ticket;
+}
+
+export async function confirmExportToolCall(
+  id: string,
+): Promise<{ url: string; filename: string; rowCount: number; expiresInSeconds: number }> {
+  const body = (await http.post(`/chat/export-calls/${id}/confirm`, {})) as any;
+  if (body.code !== 0) throw new Error(body.message);
+  return body.data;
 }
 
 export async function confirmTriage(
@@ -217,6 +229,9 @@ export async function streamChatMessage(
           break;
         case "tool_call":
           handlers.onToolCall?.(data as ChatToolCall);
+          break;
+        case "export_card":
+          handlers.onExportCard?.(data);
           break;
         case "done":
           handlers.onDone?.(data);

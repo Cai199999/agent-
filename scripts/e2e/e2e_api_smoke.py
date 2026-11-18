@@ -185,6 +185,41 @@ def main() -> int:
             detail = ticket_detail(client, admin, str(ticket_id))
             check("工单详情", bool(detail.get("ticket")), detail.get("ticket", {}).get("ticketNo", ""))
 
+            export = client.get(f"{BASE}/tickets/export",
+                                headers={"Authorization": f"Bearer {admin}"})
+            check("Excel 导出",
+                  export.status_code == 200
+                  and "spreadsheetml" in export.headers.get("content-type", "")
+                  and len(export.content) > 1000,
+                  f"http={export.status_code} bytes={len(export.content)}")
+
+            internal_token = ENV.get("INTERNAL_TOKEN_P2J_CURRENT", "")
+            internal = client.post(
+                "http://127.0.0.1:8200/internal/v1/tickets/export",
+                headers={
+                    "X-Internal-Token": internal_token,
+                    "X-Actor-Id": "10001",
+                    "X-Actor-Roles": "ADMIN",
+                },
+                json={
+                    "startTime": "2026-11-01T00:00:00+08:00",
+                    "endTime": "2026-11-18T23:59:59+08:00",
+                },
+            )
+            internal_body = internal.json() if internal.status_code == 200 else {}
+            internal_data = internal_body.get("data") or {}
+            check("内部导出接口",
+                  internal.status_code == 200
+                  and bool(internal_data.get("url"))
+                  and int(internal_data.get("rowCount") or 0) > 0,
+                  f"http={internal.status_code} rows={internal_data.get('rowCount')}")
+            if internal_data.get("url"):
+                download = client.get(internal_data["url"])
+                check("内部导出预签名下载",
+                      download.status_code == 200
+                      and "spreadsheetml" in download.headers.get("content-type", ""),
+                      f"http={download.status_code} bytes={len(download.content)}")
+
             status, body = api(client, "POST", f"/tickets/{ticket_id}/ai-analysis", admin, json={})
             analysis = body.get("data") or {}
             check("工单 AI 分析", status == 200 and body.get("code") == 0 and bool(analysis.get("summary")),

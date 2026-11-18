@@ -1,6 +1,7 @@
 package com.agentgongdan.adapters.web.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.alibaba.excel.EasyExcel;
 import com.agentgongdan.adapters.web.dto.AttachmentView;
 import com.agentgongdan.adapters.web.dto.CreateCommentRequest;
 import com.agentgongdan.adapters.web.dto.CreateTicketRequest;
@@ -13,9 +14,11 @@ import com.agentgongdan.adapters.web.dto.TicketSummary;
 import com.agentgongdan.adapters.web.dto.TransitionRequest;
 import com.agentgongdan.app.service.AttachmentService;
 import com.agentgongdan.app.service.TicketAiAnalysisService;
+import com.agentgongdan.app.service.TicketExportService;
 import com.agentgongdan.app.service.TicketService;
 import com.agentgongdan.app.service.TicketVectorService;
 import com.agentgongdan.common.api.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,9 +32,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -43,14 +50,17 @@ public class TicketController {
     private final AttachmentService attachmentService;
     private final TicketVectorService ticketVectorService;
     private final TicketAiAnalysisService ticketAiAnalysisService;
+    private final TicketExportService ticketExportService;
 
     public TicketController(TicketService ticketService, AttachmentService attachmentService,
                             TicketVectorService ticketVectorService,
-                            TicketAiAnalysisService ticketAiAnalysisService) {
+                            TicketAiAnalysisService ticketAiAnalysisService,
+                            TicketExportService ticketExportService) {
         this.ticketService = ticketService;
         this.attachmentService = attachmentService;
         this.ticketVectorService = ticketVectorService;
         this.ticketAiAnalysisService = ticketAiAnalysisService;
+        this.ticketExportService = ticketExportService;
     }
 
     @PostMapping
@@ -79,15 +89,58 @@ public class TicketController {
         Long mineUserId = mine ? StpUtil.getLoginIdAsLong() : null;
         return ApiResponse.ok(ticketService.list(page, Math.min(pageSize, 100), status, keyword,
                 priorityCode, ticketTypeCode, assigneeId, mineUserId,
-                parseUtcTime(startTime), parseUtcTime(endTime)));
+                parseDbLocalTime(startTime), parseDbLocalTime(endTime)));
     }
 
-    private LocalDateTime parseUtcTime(String value) {
+    /**
+     * Phase A：导出当前数据模型可提供的 16 列，内存生成并直接流式返回。
+     * REPORTER 默认仅能导出本人相关工单；ADMIN/DISPATCHER/ENGINEER/INSPECTOR 可导出全部。
+     */
+    @GetMapping("/export")
+    public void export(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String priorityCode,
+            @RequestParam(required = false) String ticketTypeCode,
+            @RequestParam(required = false) Long assigneeId,
+            @RequestParam(defaultValue = "false") boolean mine,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            HttpServletResponse response) throws IOException {
+        StpUtil.checkLogin();
+        StpUtil.checkPermission("ticket:read");
+        List<String> roles = StpUtil.getRoleList();
+        boolean privileged = roles.contains("ADMIN") || roles.contains("DISPATCHER")
+                || roles.contains("ENGINEER") || roles.contains("INSPECTOR");
+        Long scopeUserId = (mine || !privileged) ? StpUtil.getLoginIdAsLong() : null;
+        List<List<String>> rows = ticketExportService.exportRows(status, keyword, priorityCode,
+                ticketTypeCode, null, assigneeId, scopeUserId,
+                parseDbLocalTime(startTime), parseDbLocalTime(endTime));
+        String filename = "tickets-" + LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader("Content-Disposition",
+                "attachment; filename*=UTF-8''"
+                        + URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20"));
+        EasyExcel.write(response.getOutputStream())
+                .head(TicketExportService.HEADERS.stream().map(List::of).toList())
+                .sheet("工单")
+                .doWrite(rows);
+        response.flushBuffer();
+    }
+
+    /**
+     * 前端传入 ISO UTC；created_at 由 MySQL 按数据库本地时区写入，查询前统一转为 Asia/Shanghai。
+     */
+    private LocalDateTime parseDbLocalTime(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }
         try {
-            return OffsetDateTime.parse(value).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            return OffsetDateTime.parse(value)
+                    .atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
+                    .toLocalDateTime();
         } catch (Exception ignored) {
             try {
                 return LocalDateTime.parse(value);

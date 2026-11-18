@@ -389,6 +389,7 @@
 |---|---|---|---|---|
 | POST | `/api/v1/tickets` | 表单建单 | `ticket:create` | P0 |
 | GET | `/api/v1/tickets` | 工单列表 | `ticket:read` | P0 |
+| GET | `/api/v1/tickets/export` | Phase A 工单导出（16 列，dataScope 过滤） | `ticket:read` | P0 |
 | GET | `/api/v1/tickets/{id}` | 工单详情 | `ticket:read` | P0 |
 | GET | `/api/v1/tickets/{id}/similar` | 按工单检索相似历史工单 | `ticket:read` | P0 |
 | POST | `/api/v1/tickets/vector/reindex` | 回填工单历史向量 | `admin:config` | P0 |
@@ -431,6 +432,7 @@
 | GET | `/api/v1/chat/sessions/{id}/triage-records` | 会话分诊记录 | `chat:use` | P0 |
 | POST | `/api/v1/chat/triage-records/{id}/confirm` | 确认分诊草稿并建单 | `chat:use` + `ticket:create` | P0 |
 | POST | `/api/v1/chat/tool-calls/{id}/confirm` | 确认高风险工具（`ticket_create`）并建单 | `chat:use` + `ticket:create` | P0 |
+| POST | `/api/v1/chat/export-calls/{id}/confirm` | 确认 AI 导出草稿并生成 Excel | `chat:use` + `ticket:read` | P0 |
 | POST | `/api/v1/chat/messages/{messageId}/feedback` | 消息反馈 | `chat:use` | P2 |
 
 ### 4.4 分诊、相似工单与溯源
@@ -536,7 +538,7 @@
 | 项 | 数量 / 说明 |
 |---|---|
 | 本文档设计接口 | 约 251 条（含 P1/P2 规划） |
-| Java 已实现映射 | 52 个注解（含内部接口与健康检查；一个映射可含多个路径） |
+| Java 已实现映射 | 53 个注解（含内部接口与健康检查；一个映射可含多个路径） |
 | Python 已实现路由 | 10 个（对话、分诊、分析、知识、向量、健康） |
 | 本次补录 | `GET /api/v1/users/options`、`GET /api/v1/health/ai`、`GET /internal/v1/tickets/similar`、`POST /internal/v1/knowledge/search` |
 | 设计已列但未实现 | P1/P2 接口（报表、系统管理、业户/设备、通知 SSE、抢单池等），前端暂无入口 |
@@ -589,6 +591,7 @@
 | GET | `/internal/v1/tickets/{id}` | 查询工单 | 3s | 是 |
 | GET | `/internal/v1/tickets` | 我的/待办工单 | 3s | 是 |
 | GET | `/internal/v1/tickets/similar` | 相似历史工单检索 | 5s | 是 |
+| POST | `/internal/v1/tickets/export` | 生成工单 Excel 到 MinIO，返回预签名 URL | 10s | 是 |
 | POST | `/internal/v1/knowledge/search` | 知识检索（Agent 工具） | 5s | 是 |
 | POST | `/internal/v1/tickets/{id}/assign` | 派单（P1） | 3s | 否 |
 | POST | `/internal/v1/chat/sessions/{id}/handoff` | 转人工 | 3s | 是（session+turn） |
@@ -641,6 +644,7 @@ X-Request-Id: <uuid>
 | `citation` | `docId`、`chunkId`、`title`、`score`、`rank` | 知识引用 |
 | `triage` | `triageId`、`intent`、`confidence`、`action`、`lowConfidence` | 分诊结果（已回填 02） |
 | `tool_call` | `id`、`toolCallId`、`name`、`status`、`arguments`、`argumentsSummary`、`requiresConfirm`、`resultSummary`、`resultTicketId`、`errorCode` | 工具调用；`status=PENDING` 表示等待用户确认 |
+| `export_card` | `toolCallId`、`summary`、`filters`、`requiresConfirm` | AI 导出确认卡；`ticket_export` 草稿专用 |
 | `ticket_card` | `state`（`DRAFT`/`CREATED`）、`ticketId`、`ticketNo`、`statusCode`、`title`、`draft`、`requiresConfirm` | 草稿与已建单统一事件 |
 | `done` | `finishReason`、`usage`、`messageId`、`latencyMs` | 正常结束 |
 | `error` | `code`、`message`、`retryable`、`degraded` | 错误结束 |
@@ -659,6 +663,7 @@ X-Request-Id: <uuid>
 9. 草稿不自动建单：用户携带 `triageId` 调用 `POST /api/v1/chat/triage-records/{id}/confirm` 后才写 `ticket`、`chat_session_ticket` 与 `ticket.triage_id`；同一 `triageId` 重复确认返回同一工单（幂等键 `triage:{id}`）。
 10. 高风险工具不自动执行：`ticket_create` 仅产生 `tool_call(status=PENDING, requiresConfirm=true)` 与草稿参数；用户调用 `POST /api/v1/chat/tool-calls/{id}/confirm` 后由 Java 建单（`source_code=AGENT`），幂等键 `tool:{toolCallId}`，并写 `chat_session_ticket.created_tool_call_id`。
 11. 同一助手消息可能同时产生分诊草稿与 `ticket_create` 工具草稿；任一路径确认后，另一路径置 `CANCELLED`，避免重复建单。
+12. `ticket_export` 只产生 `tool_call(status=PENDING)` 与 `export_card`，不生成文件；用户调用 `POST /api/v1/chat/export-calls/{id}/confirm` 后，Java 生成 Excel、写入 MinIO `exports/` 并返回 10 分钟预签名 URL。
 
 **示例**
 

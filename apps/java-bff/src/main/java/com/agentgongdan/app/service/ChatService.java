@@ -370,6 +370,14 @@ public class ChatService {
                             Map.of("ts", asLong(data.get("ts"))), cancelled);
                     case "tool_call" -> handleToolCall(emitter, frameId, cancelled, data,
                             assistantId, sessionId, userId, traceId);
+                    case "export_card" -> {
+                        Map<String, Object> out = new LinkedHashMap<>();
+                        out.put("toolCallId", asString(data.get("tool_call_id")));
+                        out.put("summary", asString(data.get("summary")));
+                        out.put("filters", asMap(data.get("filters")));
+                        out.put("requiresConfirm", true);
+                        send(emitter, frameId, "export_card", out, cancelled);
+                    }
                     case "done" -> {
                         if (finalized.compareAndSet(false, true)) {
                             int tokenIn = nestedInt(data, "usage", "input_tokens");

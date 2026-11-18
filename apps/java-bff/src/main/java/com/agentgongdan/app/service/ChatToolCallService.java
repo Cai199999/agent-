@@ -12,6 +12,7 @@ import com.agentgongdan.adapters.web.dto.ChatToolCallView;
 import com.agentgongdan.adapters.web.dto.ConfirmToolCallRequest;
 import com.agentgongdan.adapters.web.dto.CreateTicketRequest;
 import com.agentgongdan.adapters.web.dto.TicketDetail;
+import com.agentgongdan.adapters.web.dto.TicketExportDownloadView;
 import com.agentgongdan.app.ports.audit.AuditPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
@@ -28,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -53,6 +56,7 @@ public class ChatToolCallService {
     private final ChatSessionTicketMapper sessionTicketMapper;
     private final TriageRecordMapper triageRecordMapper;
     private final TicketService ticketService;
+    private final TicketExportJobService ticketExportJobService;
     private final ObjectMapper objectMapper;
     private final AuditPort auditPort;
 
@@ -61,6 +65,7 @@ public class ChatToolCallService {
                                ChatSessionTicketMapper sessionTicketMapper,
                                TriageRecordMapper triageRecordMapper,
                                TicketService ticketService,
+                               TicketExportJobService ticketExportJobService,
                                ObjectMapper objectMapper,
                                AuditPort auditPort) {
         this.toolCallMapper = toolCallMapper;
@@ -68,6 +73,7 @@ public class ChatToolCallService {
         this.sessionTicketMapper = sessionTicketMapper;
         this.triageRecordMapper = triageRecordMapper;
         this.ticketService = ticketService;
+        this.ticketExportJobService = ticketExportJobService;
         this.objectMapper = objectMapper;
         this.auditPort = auditPort;
     }
@@ -223,6 +229,81 @@ public class ChatToolCallService {
         return detail;
     }
 
+    /**
+     * 确认 AI 导出草稿：由 Java 生成 Excel、写入 MinIO exports/ 并返回短时效 URL。
+     */
+    @Transactional
+    public TicketExportDownloadView confirmExport(long id, long userId, List<String> roles) {
+        ChatToolCallEntity entity = toolCallMapper.selectById(id);
+        if (entity == null) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "工具调用不存在或无权访问");
+        }
+        requireSession(entity.getSessionId(), userId);
+        if (!"PENDING".equals(entity.getStatus()) || !"ticket_export".equals(entity.getToolName())) {
+            throw new ApiException(ErrorCode.TICKET_STATE_CONFLICT, "该工具调用不可确认导出");
+        }
+        Map<String, Object> args = fromJson(entity.getArgumentsJson());
+        boolean privileged = isPrivileged(roles);
+        Long scopeUserId = privileged ? null : userId;
+        TicketExportDownloadView view = ticketExportJobService.export(
+                text(args, "status"),
+                text(args, "keyword"),
+                text(args, "priority_code"),
+                text(args, "ticket_type_code"),
+                text(args, "location"),
+                null,
+                scopeUserId,
+                parseDbLocalTime(text(args, "start_time")),
+                parseDbLocalTime(text(args, "end_time")));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", "已生成导出文件 " + view.filename() + "，共 " + view.rowCount() + " 条");
+        result.put("url", view.url());
+        result.put("filename", view.filename());
+        result.put("rowCount", view.rowCount());
+        String resultJson = toJson(result);
+        toolCallMapper.update(null, Wrappers.<ChatToolCallEntity>lambdaUpdate()
+                .eq(ChatToolCallEntity::getId, id)
+                .set(ChatToolCallEntity::getStatus, "SUCCESS")
+                .set(ChatToolCallEntity::getResultJson, resultJson)
+                .set(ChatToolCallEntity::getResultSizeBytes,
+                        resultJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+                .set(ChatToolCallEntity::getErrorCode, null));
+
+        auditPort.record(new AuditEvent(
+                userId, null, "TOOL_EXPORT_CONFIRM", "CHAT_TOOL_CALL", String.valueOf(id), null,
+                Map.of("filename", view.filename(), "rowCount", view.rowCount()),
+                "SUCCESS", null));
+        log.info("tool export confirmed, toolCall={}, filename={}, rows={}",
+                entity.getToolCallId(), view.filename(), view.rowCount());
+        return view;
+    }
+
+    private boolean isPrivileged(List<String> roles) {
+        if (roles == null) {
+            return false;
+        }
+        return roles.contains("ADMIN") || roles.contains("DISPATCHER")
+                || roles.contains("ENGINEER") || roles.contains("INSPECTOR");
+    }
+
+    private LocalDateTime parseDbLocalTime(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value)
+                    .atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
+                    .toLocalDateTime();
+        } catch (Exception ignored) {
+            try {
+                return LocalDateTime.parse(value);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+
     private CreateTicketRequest buildTicketRequest(Map<String, Object> args, ConfirmToolCallRequest overrides) {
         String title = firstText(overrides == null ? null : overrides.title(), text(args, "title"));
         String description = firstText(overrides == null ? null : overrides.description(),
@@ -249,7 +330,8 @@ public class ChatToolCallService {
     private ChatToolCallView toView(ChatToolCallEntity entity) {
         Map<String, Object> arguments = fromJson(entity.getArgumentsJson());
         Map<String, Object> result = fromJson(entity.getResultJson());
-        boolean requiresConfirm = "ticket_create".equals(entity.getToolName())
+        boolean requiresConfirm = ("ticket_create".equals(entity.getToolName())
+                || "ticket_export".equals(entity.getToolName()))
                 && "PENDING".equals(entity.getStatus());
         return new ChatToolCallView(
                 String.valueOf(entity.getId()),
@@ -261,6 +343,9 @@ public class ChatToolCallService {
                 summarize(entity.getToolName(), arguments),
                 result.get("summary") == null ? null : String.valueOf(result.get("summary")),
                 entity.getResultTicketId() == null ? null : String.valueOf(entity.getResultTicketId()),
+                result.get("url") == null ? null : String.valueOf(result.get("url")),
+                result.get("filename") == null ? null : String.valueOf(result.get("filename")),
+                result.get("rowCount") instanceof Number number ? number.intValue() : null,
                 entity.getErrorCode()
         );
     }
@@ -288,6 +373,10 @@ public class ChatToolCallService {
         if ("ticket_create".equals(name)) {
             String title = args.get("title") == null ? "" : String.valueOf(args.get("title"));
             return "标题=" + (title.length() > 40 ? title.substring(0, 40) : title);
+        }
+        if ("ticket_export".equals(name)) {
+            return "范围=" + (args.get("start_time") == null ? "?" : args.get("start_time"))
+                    + " ~ " + (args.get("end_time") == null ? "?" : args.get("end_time"));
         }
         return "";
     }

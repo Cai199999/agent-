@@ -51,6 +51,15 @@ passed=17 failed=0 total=17
 | 4 | AI 助手 → 新建 → 发送 `A栋2号梯困人了，请尽快处理` | `POST /api/v1/chat/sessions`、`POST /api/v1/chat/sessions/{id}/messages` | SSE `triage` + `ticket_card` + `done` |
 | 5 | 点击“确认建单” | `POST /api/v1/chat/triage-records/{id}/confirm` | 200，返回 `ticketNo`、`statusCode=PENDING` |
 | 6 | 工单管理搜索该工单号 | `GET /api/v1/tickets?keyword=...` | 能查到，状态“待受理” |
+| 6.1 | 工单列表点击“导出” | `GET /api/v1/tickets/export` | 下载 `.xlsx`，含 16 列表头与当前筛选数据 |
+
+### 2.2.1 AI 智能导出
+
+| 步骤 | 前端操作 | API 检查点 | 预期 |
+|---|---|---|---|
+| 6.2 | AI 助手发送 `导出今天的电梯工单` | `POST /api/v1/chat/sessions/{id}/messages` | SSE `tool_call(ticket_export, PENDING)` + `export_card` |
+| 6.3 | 查看导出确认卡 | 卡片展示时间范围/类型/摘要 | 不立即生成文件 |
+| 6.4 | 点击“确认导出” | `POST /api/v1/chat/export-calls/{id}/confirm` | 返回预签名 URL、文件名、行数；打开下载 |
 
 ### 2.3 工单 AI 分析
 

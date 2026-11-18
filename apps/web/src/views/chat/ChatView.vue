@@ -146,6 +146,42 @@
                       <span>{{ tool.errorCode || tool.resultSummary }}</span>
                     </div>
                   </template>
+                  <template v-else-if="tool.name === 'ticket_export'">
+                    <div v-if="tool.status === 'PENDING'" class="ticket-card export-card">
+                      <div class="card-head">
+                        <el-tag size="small" type="warning">导出确认</el-tag>
+                        <strong>{{ tool.resultSummary || "工单导出" }}</strong>
+                      </div>
+                      <div class="card-meta">
+                        <span v-if="tool.arguments?.start_time">
+                          范围：{{ formatExportTime(tool.arguments.start_time) }}
+                          至 {{ formatExportTime(tool.arguments.end_time) }}
+                        </span>
+                        <span v-if="tool.arguments?.ticket_type_code">类型：{{ tool.arguments.ticket_type_code }}</span>
+                        <span v-if="tool.arguments?.location">位置：{{ tool.arguments.location }}</span>
+                      </div>
+                      <div class="card-actions">
+                        <el-button size="small" @click="tool.hidden = true">忽略</el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          :loading="confirmingExportId === tool.id"
+                          @click="confirmExport(tool)"
+                        >
+                          确认导出
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else-if="tool.status === 'SUCCESS'" class="tool-line">
+                      <el-tag size="small" type="success">已生成</el-tag>
+                      <span>{{ tool.resultSummary }}</span>
+                      <el-button link type="primary" @click="openExport(tool)">下载 Excel</el-button>
+                    </div>
+                    <div v-else class="tool-line tool-failed">
+                      <el-tag size="small" type="danger">导出失败</el-tag>
+                      <span>{{ tool.errorCode || tool.resultSummary }}</span>
+                    </div>
+                  </template>
                   <div v-else class="tool-line">
                     <el-tag size="small" :type="tool.status === 'SUCCESS' ? 'success' : 'danger'">
                       {{ tool.name }}
@@ -267,6 +303,42 @@
                       <span>{{ tool.errorCode || tool.resultSummary }}</span>
                     </div>
                   </template>
+                  <template v-else-if="tool.name === 'ticket_export'">
+                    <div v-if="tool.status === 'PENDING'" class="ticket-card export-card">
+                      <div class="card-head">
+                        <el-tag size="small" type="warning">导出确认</el-tag>
+                        <strong>{{ tool.resultSummary || "工单导出" }}</strong>
+                      </div>
+                      <div class="card-meta">
+                        <span v-if="tool.arguments?.start_time">
+                          范围：{{ formatExportTime(tool.arguments.start_time) }}
+                          至 {{ formatExportTime(tool.arguments.end_time) }}
+                        </span>
+                        <span v-if="tool.arguments?.ticket_type_code">类型：{{ tool.arguments.ticket_type_code }}</span>
+                        <span v-if="tool.arguments?.location">位置：{{ tool.arguments.location }}</span>
+                      </div>
+                      <div class="card-actions">
+                        <el-button size="small" @click="tool.hidden = true">忽略</el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          :loading="confirmingExportId === tool.id"
+                          @click="confirmExport(tool)"
+                        >
+                          确认导出
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else-if="tool.status === 'SUCCESS'" class="tool-line">
+                      <el-tag size="small" type="success">已生成</el-tag>
+                      <span>{{ tool.resultSummary }}</span>
+                      <el-button link type="primary" @click="openExport(tool)">下载 Excel</el-button>
+                    </div>
+                    <div v-else class="tool-line tool-failed">
+                      <el-tag size="small" type="danger">导出失败</el-tag>
+                      <span>{{ tool.errorCode || tool.resultSummary }}</span>
+                    </div>
+                  </template>
                   <div v-else class="tool-line">
                     <el-tag size="small" :type="tool.status === 'SUCCESS' ? 'success' : 'danger'">
                       {{ tool.name }}
@@ -320,6 +392,7 @@ import { getAiHealth } from "@/api/health";
 import { http, toErrorMessage } from "@/api/http";
 import {
   archiveChatSession,
+  confirmExportToolCall,
   confirmToolCall,
   confirmTriage,
   createChatSession,
@@ -354,6 +427,7 @@ const liveCard = ref<TicketCard | null>(null);
 const liveToolCalls = ref<ChatToolCall[]>([]);
 const confirmingTriageId = ref("");
 const confirmingToolId = ref("");
+const confirmingExportId = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
 const aiDegraded = ref(false);
 let abortController: AbortController | null = null;
@@ -570,6 +644,59 @@ async function downloadCitation(citation: ChatCitation): Promise<void> {
   }
 }
 
+function formatExportTime(value?: string): string {
+  return value ? new Date(value).toLocaleString() : "";
+}
+
+function openExport(tool: ChatToolCall): void {
+  if (tool.resultUrl) {
+    window.open(tool.resultUrl, "_blank", "noopener");
+  } else {
+    ElMessage.warning("下载地址已失效，请重新发起导出");
+  }
+}
+
+async function confirmExport(tool: ChatToolCall): Promise<void> {
+  if (tool.status !== "PENDING" || confirmingExportId.value) return;
+  confirmingExportId.value = tool.id;
+  try {
+    const result = await confirmExportToolCall(tool.id);
+    tool.status = "SUCCESS";
+    tool.resultSummary = `已生成 ${result.filename}（${result.rowCount} 条）`;
+    tool.resultUrl = result.url;
+    tool.resultFilename = result.filename;
+    tool.resultRowCount = result.rowCount;
+    window.open(result.url, "_blank", "noopener");
+    ElMessage.success("导出文件已生成");
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "导出失败"));
+  } finally {
+    confirmingExportId.value = "";
+  }
+}
+
+function upsertExportCard(data: any): void {
+  const toolCallId = data.toolCallId;
+  if (!toolCallId) return;
+  const existing = liveToolCalls.value.find((item) => item.toolCallId === toolCallId);
+  if (existing) {
+    existing.arguments = data.filters ?? existing.arguments;
+    existing.resultSummary = data.summary ?? existing.resultSummary;
+    existing.requiresConfirm = true;
+    if (existing.status !== "SUCCESS") existing.status = "PENDING";
+    return;
+  }
+  liveToolCalls.value.push({
+    id: toolCallId,
+    toolCallId,
+    name: "ticket_export",
+    status: "PENDING",
+    requiresConfirm: true,
+    arguments: data.filters ?? {},
+    resultSummary: data.summary ?? null,
+  });
+}
+
 async function loadSessions(): Promise<void> {
   sessionsLoading.value = true;
   try {
@@ -718,6 +845,9 @@ async function send(): Promise<void> {
           } else {
             liveToolCalls.value.push(tool);
           }
+        },
+        onExportCard(data) {
+          upsertExportCard(data);
         },
         onDone() {
           // 收尾统一在下方处理

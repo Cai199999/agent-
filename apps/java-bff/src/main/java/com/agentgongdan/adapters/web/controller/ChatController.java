@@ -9,6 +9,7 @@ import com.agentgongdan.adapters.web.dto.CreateChatSessionRequest;
 import com.agentgongdan.adapters.web.dto.PageResult;
 import com.agentgongdan.adapters.web.dto.SendChatMessageRequest;
 import com.agentgongdan.adapters.web.dto.TicketDetail;
+import com.agentgongdan.adapters.web.dto.TicketExportDownloadView;
 import com.agentgongdan.adapters.web.dto.TriageRecordView;
 import com.agentgongdan.app.service.ChatService;
 import com.agentgongdan.app.service.ChatToolCallService;
@@ -119,6 +120,15 @@ public class ChatController {
         ConfirmTriageRequest overrides = request != null ? request
                 : new ConfirmTriageRequest(null, null, null, null, null, null, null, null);
         return ApiResponse.ok(triageService.confirm(id, overrides, StpUtil.getLoginIdAsLong()));
+    }
+
+    @PostMapping("/export-calls/{id}/confirm")
+    public ApiResponse<TicketExportDownloadView> confirmExportCall(@PathVariable long id) {
+        StpUtil.checkLogin();
+        StpUtil.checkPermission("chat:use");
+        StpUtil.checkPermission("ticket:read");
+        return ApiResponse.ok(toolCallService.confirmExport(
+                id, StpUtil.getLoginIdAsLong(), StpUtil.getRoleList()));
     }
 
     @PostMapping("/tool-calls/{id}/confirm")

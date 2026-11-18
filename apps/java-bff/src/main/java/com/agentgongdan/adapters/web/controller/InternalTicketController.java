@@ -1,9 +1,12 @@
 package com.agentgongdan.adapters.web.controller;
 
 import com.agentgongdan.adapters.web.dto.CreateTicketRequest;
+import com.agentgongdan.adapters.web.dto.InternalTicketExportRequest;
 import com.agentgongdan.adapters.web.dto.SimilarTicketView;
 import com.agentgongdan.adapters.web.dto.TicketDetail;
+import com.agentgongdan.adapters.web.dto.TicketExportDownloadView;
 import com.agentgongdan.adapters.web.dto.TicketSummary;
+import com.agentgongdan.app.service.TicketExportJobService;
 import com.agentgongdan.app.service.TicketService;
 import com.agentgongdan.app.service.TicketVectorService;
 import com.agentgongdan.common.api.ApiResponse;
@@ -20,6 +23,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -31,10 +37,14 @@ public class InternalTicketController {
 
     private final TicketService ticketService;
     private final TicketVectorService ticketVectorService;
+    private final TicketExportJobService ticketExportJobService;
 
-    public InternalTicketController(TicketService ticketService, TicketVectorService ticketVectorService) {
+    public InternalTicketController(TicketService ticketService,
+                                    TicketVectorService ticketVectorService,
+                                    TicketExportJobService ticketExportJobService) {
         this.ticketService = ticketService;
         this.ticketVectorService = ticketVectorService;
+        this.ticketExportJobService = ticketExportJobService;
     }
 
     @GetMapping
@@ -63,6 +73,43 @@ public class InternalTicketController {
             @RequestAttribute("internalActorRoles") List<String> roles) {
         return ApiResponse.ok(ticketVectorService.similarByQuery(
                 query, Math.min(Math.max(topK, 1), 20)));
+    }
+
+    /**
+     * AI/内部导出：生成 Excel 到项目 MinIO exports/ 前缀，返回 10 分钟预签名地址。
+     */
+    @PostMapping("/export")
+    public ApiResponse<TicketExportDownloadView> export(
+            @RequestBody(required = false) InternalTicketExportRequest request,
+            @RequestAttribute("internalActorId") long actorId,
+            @RequestAttribute("internalActorRoles") List<String> roles) {
+        InternalTicketExportRequest req = request == null
+                ? new InternalTicketExportRequest(null, null, null, null, null, null, null, null)
+                : request;
+        boolean privileged = roles.contains("ADMIN") || roles.contains("DISPATCHER")
+                || roles.contains("ENGINEER") || roles.contains("INSPECTOR");
+        Long scopeUserId = privileged ? null : actorId;
+        return ApiResponse.ok(ticketExportJobService.export(
+                req.status(), req.keyword(), req.priorityCode(), req.ticketTypeCode(),
+                req.location(), req.assigneeId(), scopeUserId,
+                parseDbLocalTime(req.startTime()), parseDbLocalTime(req.endTime())));
+    }
+
+    private LocalDateTime parseDbLocalTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value)
+                    .atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
+                    .toLocalDateTime();
+        } catch (Exception ignored) {
+            try {
+                return LocalDateTime.parse(value);
+            } catch (Exception e) {
+                return null;
+            }
+        }
     }
 
     @PostMapping

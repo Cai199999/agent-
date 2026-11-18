@@ -8,6 +8,8 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from domain.chat import ChatCommand
 from domain.tool import ToolCall
@@ -29,6 +31,9 @@ SYSTEM_PROMPT = """你是「IT 运维工单智能助手」，服务于物业与 
 - 需要引用规范、流程或知识文档时，调用 knowledge_search 检索知识库。
 - 用户明确报修且已提供位置、设备或故障现象时，可调用 ticket_create 生成草稿；草稿必须由用户在界面上确认后才会真正建单。
 - 信息不足时先追问，不要调用 ticket_create。
+- 用户要求导出工单/生成报表时，调用 ticket_export；必须把“上周/上个月/最近一周”等表述解析为明确的 ISO 8601 时间范围（Asia/Shanghai，例如 2026-11-10T00:00:00+08:00），不得猜测日期；缺少时间范围时先追问。
+- 用户给出“上周/上个月/最近一周”等相对时间时，直接按当前时间计算并调用 ticket_export，不要反问用户具体日期。
+- ticket_export 只生成待确认导出草稿，不会立即生成文件；不得声称已导出，必须提示用户点击确认。
 - 不得伪造工具调用结果；工具失败时如实说明并给出替代建议。"""
 
 
@@ -159,6 +164,13 @@ class ChatService:
                         "result_truncated": result_truncated,
                         "error_code": result.error_code if result else "tool_invalid_arguments",
                     }
+                    if name == "ticket_export" and status == "CONFIRM_REQUIRED":
+                        yield "export_card", {
+                            "tool_call_id": call_id,
+                            "summary": message,
+                            "filters": (result.data or {}).get("filters", {}) if result else {},
+                            "requires_confirm": True,
+                        }
 
                     messages.append({
                         "role": "tool",
@@ -233,7 +245,10 @@ class ChatService:
         }, ensure_ascii=False)
 
     def _build_messages(self, command: ChatCommand, chunks) -> list[dict]:
-        system = SYSTEM_PROMPT + "\n\n" + self._render_context(chunks)
+        now = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        system = (SYSTEM_PROMPT
+                  + f"\n\n当前时间：{now}（Asia/Shanghai）。"
+                  + "\n\n" + self._render_context(chunks))
         messages: list[dict] = [{"role": "system", "content": system}]
         for message in command.messages[-24:]:
             content = (message.content or "").strip()

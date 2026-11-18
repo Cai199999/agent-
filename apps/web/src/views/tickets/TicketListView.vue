@@ -2,9 +2,22 @@
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">工单管理</h2>
-      <el-button v-if="can('ticket:create')" type="primary" @click="openCreate">
-        新建工单
-      </el-button>
+      <div class="page-actions">
+        <el-date-picker
+          v-model="filters.dateRange"
+          type="datetimerange"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          style="width: 340px"
+        />
+        <el-button v-if="can('ticket:read')" :loading="exporting" @click="exportTickets">
+          导出
+        </el-button>
+        <el-button v-if="can('ticket:create')" type="primary" @click="openCreate">
+          新建工单
+        </el-button>
+      </div>
     </div>
 
     <el-card class="filter-card">
@@ -29,16 +42,6 @@
           <el-select v-model="filters.ticketTypeCode" clearable placeholder="全部" style="width: 150px">
             <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="提交时间">
-          <el-date-picker
-            v-model="filters.dateRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            style="width: 360px"
-          />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="filters.mine">只看我的</el-checkbox>
@@ -456,6 +459,7 @@ interface Attachment {
 const auth = useAuthStore();
 const loading = ref(false);
 const creating = ref(false);
+const exporting = ref(false);
 const tickets = ref<TicketSummary[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -561,6 +565,44 @@ function formatSize(value?: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function exportFileName(): string {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `tickets-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.xlsx`;
+}
+
+async function exportTickets(): Promise<void> {
+  exporting.value = true;
+  try {
+    const blob = (await http.get("/tickets/export", {
+      params: {
+        status: filters.status || undefined,
+        keyword: filters.keyword || undefined,
+        priorityCode: filters.priorityCode || undefined,
+        ticketTypeCode: filters.ticketTypeCode || undefined,
+        mine: filters.mine,
+        startTime: filters.dateRange?.[0]?.toISOString(),
+        endTime: filters.dateRange?.[1]?.toISOString(),
+      },
+      responseType: "blob",
+    })) as unknown as Blob;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = exportFileName();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    ElMessage.success("导出完成");
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "导出失败"));
+  } finally {
+    exporting.value = false;
+  }
 }
 
 async function load(): Promise<void> {
@@ -918,6 +960,11 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .similar-list {
   min-height: 60px;
