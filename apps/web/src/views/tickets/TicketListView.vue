@@ -348,7 +348,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { http } from "@/api/http";
+import { http, toErrorMessage } from "@/api/http";
 import { useAuthStore } from "@/stores/auth";
 
 interface TicketSummary {
@@ -583,7 +583,7 @@ async function load(): Promise<void> {
     tickets.value = body.data.items || [];
     total.value = body.data.total || 0;
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载工单失败");
+    ElMessage.error(toErrorMessage(error, "加载工单失败"));
   } finally {
     loading.value = false;
   }
@@ -625,7 +625,7 @@ async function openAssign(row: TicketSummary): Promise<void> {
   try {
     await loadUserOptions();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载用户列表失败");
+    ElMessage.error(toErrorMessage(error, "加载用户列表失败"));
   }
 }
 
@@ -721,7 +721,7 @@ async function createTicket(): Promise<void> {
     createForm.locationText = "";
     await load();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "创建失败");
+    ElMessage.error(toErrorMessage(error, "创建失败"));
   } finally {
     creating.value = false;
   }
@@ -737,7 +737,7 @@ async function performAction(row: TicketSummary, action: string, payload: Record
       await openDetail(row);
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "操作失败");
+    ElMessage.error(toErrorMessage(error, "操作失败"));
   }
 }
 
@@ -796,7 +796,7 @@ async function openDetail(row: TicketSummary): Promise<void> {
     similarTickets.value = similarBody?.code === 0 ? (similarBody.data || []) : [];
     aiAnalysis.value = analysisBody?.code === 0 ? (analysisBody.data || null) : null;
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载详情失败");
+    ElMessage.error(toErrorMessage(error, "加载详情失败"));
   } finally {
     detailLoading.value = false;
     similarLoading.value = false;
@@ -812,7 +812,7 @@ async function runAnalysis(): Promise<void> {
     aiAnalysis.value = body.data;
     ElMessage.success("AI 分析完成");
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "AI 分析失败");
+    ElMessage.error(toErrorMessage(error, "AI 分析失败"));
   } finally {
     analysisRunning.value = false;
   }
@@ -835,7 +835,7 @@ async function downloadKnowledge(docId: string): Promise<void> {
     if (body.code !== 0) throw new Error(body.message);
     window.open(body.data.url, "_blank", "noopener");
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "知识下载失败");
+    ElMessage.error(toErrorMessage(error, "知识下载失败"));
   }
 }
 
@@ -868,7 +868,7 @@ async function uploadAttachment(options: any): Promise<void> {
     options.onSuccess?.(body);
     await loadAttachments();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "上传失败");
+    ElMessage.error(toErrorMessage(error, "上传失败"));
     options.onError?.(error);
   } finally {
     attachmentLoading.value = false;
@@ -897,7 +897,7 @@ async function addComment(): Promise<void> {
       comments.value = commentsBody.data || [];
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "添加评论失败");
+    ElMessage.error(toErrorMessage(error, "添加评论失败"));
   } finally {
     commentLoading.value = false;
   }

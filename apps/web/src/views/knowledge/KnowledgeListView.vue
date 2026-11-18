@@ -87,7 +87,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { http } from "@/api/http";
+import { http, toErrorMessage } from "@/api/http";
 import { useAuthStore } from "@/stores/auth";
 
 interface KnowledgeDoc {
@@ -146,7 +146,7 @@ async function loadDocs(): Promise<void> {
     if (body.code !== 0) throw new Error(body.message);
     docs.value = body.data.items || [];
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载知识文档失败");
+    ElMessage.error(toErrorMessage(error, "加载知识文档失败"));
   } finally {
     docsLoading.value = false;
   }
@@ -158,7 +158,7 @@ async function downloadDoc(row: KnowledgeDoc): Promise<void> {
     if (body.code !== 0) throw new Error(body.message);
     window.open(body.data.url, "_blank", "noopener");
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "下载失败");
+    ElMessage.error(toErrorMessage(error, "下载失败"));
   }
 }
 
@@ -178,7 +178,7 @@ async function deleteDoc(row: KnowledgeDoc): Promise<void> {
     ElMessage.success("知识已删除");
     await loadDocs();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "删除失败");
+    ElMessage.error(toErrorMessage(error, "删除失败"));
   }
 }
 
@@ -202,7 +202,7 @@ async function uploadKnowledge(options: any): Promise<void> {
     uploadForm.title = "";
     await loadDocs();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "知识入库失败");
+    ElMessage.error(toErrorMessage(error, "知识入库失败"));
     options.onError?.(error);
   } finally {
     uploadLoading.value = false;
@@ -224,7 +224,7 @@ async function search(): Promise<void> {
     if (body.code !== 0) throw new Error(body.message);
     hits.value = body.data || [];
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "检索失败");
+    ElMessage.error(toErrorMessage(error, "检索失败"));
     hits.value = [];
   } finally {
     searchLoading.value = false;

@@ -57,6 +57,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Bell } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { useAuthStore } from "@/stores/auth";
+import { toErrorMessage } from "@/api/http";
 import {
   fetchUnreadCount,
   listNotifications,
@@ -99,7 +100,7 @@ async function loadNotifications(): Promise<void> {
     const result = await listNotifications({ unread: unreadOnly.value, pageSize: 50 });
     notifications.value = result.items;
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载通知失败");
+    ElMessage.error(toErrorMessage(error, "加载通知失败"));
   } finally {
     notificationLoading.value = false;
   }
@@ -121,7 +122,7 @@ async function readOne(item: NotificationItem): Promise<void> {
       notifications.value = notifications.value.filter((row) => row.id !== item.id);
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "操作失败");
+    ElMessage.error(toErrorMessage(error, "操作失败"));
   }
 }
 
@@ -135,7 +136,7 @@ async function readAll(): Promise<void> {
       notifications.value = [];
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "操作失败");
+    ElMessage.error(toErrorMessage(error, "操作失败"));
   }
 }
 

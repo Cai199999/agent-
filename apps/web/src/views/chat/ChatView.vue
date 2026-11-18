@@ -43,7 +43,7 @@
         </template>
       </el-alert>
 
-      <div ref="messageListRef" v-loading="messagesLoading" class="message-list">
+      <div ref="messageListRef" v-loading="messagesLoading" class="message-list" @scroll="onMessageScroll">
         <el-empty v-if="!currentSessionId" description="新建或选择会话开始提问" />
         <template v-else>
           <div v-if="!messages.length && !sending" class="chat-hint">
@@ -58,7 +58,15 @@
               <div v-if="item.role === 'ASSISTANT'" class="markdown" v-html="renderMarkdown(item.content)"></div>
               <div v-else class="plain">{{ item.content }}</div>
               <div v-if="item.citations?.length" class="citations">
-                <el-tag v-for="citation in item.citations" :key="citation.chunkId" size="small" effect="plain">
+                <el-tag
+                  v-for="citation in item.citations"
+                  :key="citation.chunkId"
+                  size="small"
+                  effect="plain"
+                  class="citation-tag"
+                  title="点击下载知识原文"
+                  @click="downloadCitation(citation)"
+                >
                   [{{ citation.rank }}] {{ citation.title || "知识片段" }}
                   <span v-if="citation.score != null"> {{ Math.round(citation.score * 100) }}%</span>
                 </el-tag>
@@ -172,7 +180,15 @@
             <div class="bubble">
               <div class="markdown" v-html="renderMarkdown(streamingContent || '正在思考…')"></div>
               <div v-if="streamingCitations.length" class="citations">
-                <el-tag v-for="citation in streamingCitations" :key="citation.chunkId" size="small" effect="plain">
+                <el-tag
+                  v-for="citation in streamingCitations"
+                  :key="citation.chunkId"
+                  size="small"
+                  effect="plain"
+                  class="citation-tag"
+                  title="点击下载知识原文"
+                  @click="downloadCitation(citation)"
+                >
                   [{{ citation.rank }}] {{ citation.title || "知识片段" }}
                 </el-tag>
               </div>
@@ -301,6 +317,7 @@ import { Delete } from "@element-plus/icons-vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import { getAiHealth } from "@/api/health";
+import { http, toErrorMessage } from "@/api/http";
 import {
   archiveChatSession,
   confirmToolCall,
@@ -341,6 +358,9 @@ const messageListRef = ref<HTMLElement | null>(null);
 const aiDegraded = ref(false);
 let abortController: AbortController | null = null;
 let aiHealthTimer: number | undefined;
+let deltaBuffer = "";
+let deltaTimer: number | undefined;
+let stickToBottom = true;
 
 const currentSession = computed(() => sessions.value.find((item) => item.id === currentSessionId.value));
 
@@ -480,7 +500,7 @@ async function confirmTool(call: ChatToolCall): Promise<void> {
     call.resultTicketId = ticket.id;
     ElMessage.success(`已创建工单 ${ticket.ticketNo}`);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "确认建单失败");
+    ElMessage.error(toErrorMessage(error, "确认建单失败"));
   } finally {
     confirmingToolId.value = "";
   }
@@ -498,7 +518,7 @@ async function confirmCard(card: TicketCard): Promise<void> {
     card.statusCode = ticket.statusCode;
     ElMessage.success(`已创建工单 ${ticket.ticketNo}`);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "确认建单失败");
+    ElMessage.error(toErrorMessage(error, "确认建单失败"));
   } finally {
     confirmingTriageId.value = "";
   }
@@ -508,10 +528,46 @@ function formatTime(value?: string | null): string {
   return value ? new Date(value).toLocaleString() : "";
 }
 
-async function scrollToBottom(): Promise<void> {
+function onMessageScroll(): void {
+  const element = messageListRef.value;
+  if (!element) return;
+  // 只有用户接近底部时才自动跟随，避免向上翻阅时被强制拉回。
+  stickToBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+}
+
+async function scrollToBottom(force = false): Promise<void> {
+  if (!force && !stickToBottom) return;
   await nextTick();
   const element = messageListRef.value;
   if (element) element.scrollTop = element.scrollHeight;
+}
+
+/** 30–50ms 合批，避免每个 token 都触发 Markdown 解析与 nextTick。 */
+function queueDelta(delta: string): void {
+  deltaBuffer += delta;
+  if (deltaTimer !== undefined) return;
+  deltaTimer = window.setTimeout(flushDelta, 40);
+}
+
+function flushDelta(): void {
+  if (deltaTimer !== undefined) {
+    window.clearTimeout(deltaTimer);
+    deltaTimer = undefined;
+  }
+  if (!deltaBuffer) return;
+  streamingContent.value += deltaBuffer;
+  deltaBuffer = "";
+  void scrollToBottom();
+}
+
+async function downloadCitation(citation: ChatCitation): Promise<void> {
+  try {
+    const body = (await http.get(`/knowledge/docs/${citation.docId}/download`)) as any;
+    if (body.code !== 0) throw new Error(body.message);
+    window.open(body.data.url, "_blank", "noopener");
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "知识下载失败"));
+  }
 }
 
 async function loadSessions(): Promise<void> {
@@ -522,7 +578,7 @@ async function loadSessions(): Promise<void> {
       await selectSession(sessions.value[0].id);
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载会话失败");
+    ElMessage.error(toErrorMessage(error, "加载会话失败"));
   } finally {
     sessionsLoading.value = false;
   }
@@ -538,9 +594,10 @@ async function selectSession(sessionId: string): Promise<void> {
       listTriageRecords(sessionId).catch(() => [] as TriageRecord[]),
     ]);
     messages.value = attachTriages(list, triages);
-    await scrollToBottom();
+    stickToBottom = true;
+    await scrollToBottom(true);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "加载消息失败");
+    ElMessage.error(toErrorMessage(error, "加载消息失败"));
   } finally {
     messagesLoading.value = false;
   }
@@ -554,9 +611,10 @@ async function startNewSession(): Promise<void> {
     currentSessionId.value = session.id;
     messages.value = [];
     input.value = "";
-    await scrollToBottom();
+    stickToBottom = true;
+    await scrollToBottom(true);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "新建会话失败");
+    ElMessage.error(toErrorMessage(error, "新建会话失败"));
   }
 }
 
@@ -579,7 +637,7 @@ async function removeSession(sessionId: string): Promise<void> {
       if (sessions.value.length) await selectSession(sessions.value[0].id);
     }
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "归档失败");
+    ElMessage.error(toErrorMessage(error, "归档失败"));
   }
 }
 
@@ -606,10 +664,17 @@ async function send(): Promise<void> {
   liveTriage.value = null;
   liveCard.value = null;
   liveToolCalls.value = [];
+  deltaBuffer = "";
+  if (deltaTimer !== undefined) {
+    window.clearTimeout(deltaTimer);
+    deltaTimer = undefined;
+  }
+  stickToBottom = true;
   abortController = new AbortController();
-  await scrollToBottom();
+  await scrollToBottom(true);
 
   let assistantId = "";
+  let traceId = "";
   const failure: { value: { code: number; message: string } | null } = { value: null };
 
   try {
@@ -619,10 +684,10 @@ async function send(): Promise<void> {
       {
         onMeta(data) {
           assistantId = data.assistantMessageId ?? "";
+          traceId = data.traceId ?? "";
         },
         onDelta(delta) {
-          streamingContent.value += delta;
-          void scrollToBottom();
+          queueDelta(delta);
         },
         onCitation(citation) {
           streamingCitations.value.push(citation);
@@ -658,16 +723,20 @@ async function send(): Promise<void> {
           // 收尾统一在下方处理
         },
         onErrorEvent(data) {
-          failure.value = { code: data.code, message: data.message };
+          failure.value = {
+            code: data.code,
+            message: data.message && traceId ? `${data.message}（追踪号：${traceId}）` : data.message,
+          };
         },
       },
       abortController.signal,
     );
   } catch (error: any) {
     if (!failure.value) {
-      failure.value = { code: 0, message: error?.message || "对话流中断" };
+      failure.value = { code: 0, message: toErrorMessage(error, "对话流中断，请稍后重试") };
     }
   } finally {
+    flushDelta();
     const finalContent = streamingContent.value;
     const failureValue = failure.value;
     const triageSnapshot = liveTriage.value;
@@ -722,6 +791,9 @@ onBeforeUnmount(() => {
   abortController?.abort();
   if (aiHealthTimer !== undefined) {
     window.clearInterval(aiHealthTimer);
+  }
+  if (deltaTimer !== undefined) {
+    window.clearTimeout(deltaTimer);
   }
 });
 </script>
@@ -885,6 +957,13 @@ onBeforeUnmount(() => {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px dashed #ebeef5;
+}
+.citation-tag {
+  cursor: pointer;
+}
+.citation-tag:hover {
+  color: #409eff;
+  border-color: #409eff;
 }
 .failed {
   margin-top: 8px;

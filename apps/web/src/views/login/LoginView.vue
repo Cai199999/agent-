@@ -31,6 +31,7 @@ import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useAuthStore } from "@/stores/auth";
+import { toErrorMessage } from "@/api/http";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -48,7 +49,7 @@ async function onLogin(): Promise<void> {
     ElMessage.success("登录成功");
     await router.push("/tickets");
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.message || "登录失败");
+    ElMessage.error(toErrorMessage(error, "登录失败"));
   } finally {
     loading.value = false;
   }

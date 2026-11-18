@@ -1,5 +1,5 @@
 import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { getAccessToken, http } from "@/api/http";
+import { appendTrace, getAccessToken, http, httpStatusMessage } from "@/api/http";
 
 export interface ChatSession {
   id: string;
@@ -179,14 +179,16 @@ export async function streamChatMessage(
     openWhenHidden: true,
     async onopen(response) {
       if (!response.ok) {
-        let message = `请求失败 (${response.status})`;
+        let message = httpStatusMessage(response.status);
+        let traceId = "";
         try {
           const body = await response.json();
           message = body?.message || message;
+          traceId = body?.traceId || "";
         } catch {
-          // 非 JSON 错误体
+          // 非 JSON 错误体，使用状态码映射。
         }
-        throw new Error(message);
+        throw new Error(appendTrace(message, traceId));
       }
     },
     onmessage(message) {
@@ -227,7 +229,10 @@ export async function streamChatMessage(
       }
     },
     onerror(error) {
-      throw error instanceof Error ? error : new Error("对话流异常");
+      if (error instanceof Error && !/failed to fetch|network error|load failed/i.test(error.message)) {
+        throw error;
+      }
+      throw new Error("网络连接异常，对话流已中断，请检查网络后重试");
     },
   });
 }
