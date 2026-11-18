@@ -28,6 +28,9 @@ public record TicketSummary(
         String contactName,
         String contactPhoneMask,
         String addressText,
-        String indoorPublicArea
+        String indoorPublicArea,
+        String locationType,
+        String serviceItemText,
+        String onsiteSituation
 ) {
 }

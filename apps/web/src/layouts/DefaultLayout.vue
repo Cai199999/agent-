@@ -18,7 +18,9 @@
               <el-icon><Bell /></el-icon>
             </el-button>
           </el-badge>
-          <span>{{ auth.user?.displayName || auth.user?.username || "未登录" }}</span>
+          <el-button link type="primary" @click="router.push('/profile')">
+            {{ auth.user?.displayName || auth.user?.username || "未登录" }}
+          </el-button>
           <el-button link type="primary" @click="logout">退出</el-button>
         </div>
       </el-header>

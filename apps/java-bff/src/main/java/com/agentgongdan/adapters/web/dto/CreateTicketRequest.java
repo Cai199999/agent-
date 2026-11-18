@@ -3,7 +3,7 @@ package com.agentgongdan.adapters.web.dto;
 import jakarta.validation.constraints.NotBlank;
 
 public record CreateTicketRequest(
-        @NotBlank(message = "标题不能为空") String title,
+        String title,
         String description,
         @NotBlank(message = "工单类型不能为空") String ticketTypeCode,
         String priorityCode,
@@ -18,6 +18,8 @@ public record CreateTicketRequest(
         String appointmentAt,
         String contactName,
         String addressText,
-        String indoorPublicArea
+        String indoorPublicArea,
+        String locationType,
+        String serviceItemText
 ) {
 }

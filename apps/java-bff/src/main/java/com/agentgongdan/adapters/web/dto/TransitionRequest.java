@@ -8,6 +8,8 @@ public record TransitionRequest(
         Boolean approved,
         String reason,
         String closeReasonCode,
-        String cancelReason
+        String cancelReason,
+        String onsiteSituation,
+        String serviceItemText
 ) {
 }

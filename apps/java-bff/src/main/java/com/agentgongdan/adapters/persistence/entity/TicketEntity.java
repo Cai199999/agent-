@@ -34,11 +34,13 @@ public class TicketEntity {
     private Long roomId;
     private Long equipmentId;
     private Long serviceItemId;
+    private String serviceItemText;
     private Long workflowId;
     private String currentNodeCode;
     private LocalDateTime appointmentAt;
     private LocalDateTime receivedAt;
     private LocalDateTime arrivedAt;
+    private String onsiteSituation;
     private LocalDateTime taskDueAt;
     private String contactName;
     private String contactPhoneEnc;
@@ -46,6 +48,7 @@ public class TicketEntity {
     private String addressText;
     private String indoorPublicArea;
     private String locationText;
+    private String locationType;
     private Long slaPolicyId;
     private LocalDateTime slaResponseDueAt;
     private LocalDateTime slaResolveDueAt;

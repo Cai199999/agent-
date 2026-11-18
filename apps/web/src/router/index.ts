@@ -5,6 +5,7 @@ import DashboardView from "@/views/dashboard/DashboardView.vue";
 import TicketListView from "@/views/tickets/TicketListView.vue";
 import ChatView from "@/views/chat/ChatView.vue";
 import KnowledgeListView from "@/views/knowledge/KnowledgeListView.vue";
+import ProfileView from "@/views/profile/ProfileView.vue";
 import { useAuthStore } from "@/stores/auth";
 
 const router = createRouter({
@@ -20,6 +21,7 @@ const router = createRouter({
         { path: "tickets", name: "tickets", component: TicketListView },
         { path: "chat", name: "chat", component: ChatView },
         { path: "knowledge", name: "knowledge", component: KnowledgeListView },
+        { path: "profile", name: "profile", component: ProfileView },
       ],
     },
   ],

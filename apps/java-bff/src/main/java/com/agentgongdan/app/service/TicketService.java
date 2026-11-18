@@ -64,6 +64,7 @@ public class TicketService {
     private final SysUserMapper userMapper;
     private final NotificationService notificationService;
     private final TicketVectorService ticketVectorService;
+    private final UserProfileService userProfileService;
     private final ObjectMapper objectMapper;
     private final AuditPort auditPort;
 
@@ -75,6 +76,7 @@ public class TicketService {
                          SysUserMapper userMapper,
                          NotificationService notificationService,
                          TicketVectorService ticketVectorService,
+                         UserProfileService userProfileService,
                          ObjectMapper objectMapper,
                          AuditPort auditPort) {
         this.ticketMapper = ticketMapper;
@@ -85,6 +87,7 @@ public class TicketService {
         this.userMapper = userMapper;
         this.notificationService = notificationService;
         this.ticketVectorService = ticketVectorService;
+        this.userProfileService = userProfileService;
         this.objectMapper = objectMapper;
         this.auditPort = auditPort;
     }
@@ -140,12 +143,20 @@ public class TicketService {
         long ticketId = IdWorker.getId();
         String ticketNo = nextTicketNo();
         String priority = StringUtils.hasText(request.priorityCode()) ? request.priorityCode() : "NORMAL";
+        UserProfileService.ProfileSnapshot profile = userProfileService.snapshot(userId);
+        String title = StringUtils.hasText(request.title())
+                ? request.title().trim() : defaultTitle(request.description());
+        Long projectId = firstNonNull(request.projectId(), profile.projectId());
+        Long buildingId = firstNonNull(request.buildingId(), profile.buildingId());
+        Long customerId = firstNonNull(request.customerId(), profile.customerId());
+        Long roomId = firstNonNull(request.roomId(), profile.roomId());
+        String contactName = firstText(request.contactName(), profile.contactName());
 
         TicketEntity ticket = new TicketEntity();
         ticket.setId(ticketId);
         ticket.setTenantId(0L);
         ticket.setTicketNo(ticketNo);
-        ticket.setTitle(request.title());
+        ticket.setTitle(title);
         ticket.setDescription(request.description());
         ticket.setTicketTypeCode(request.ticketTypeCode());
         ticket.setPriorityCode(priority);
@@ -155,19 +166,25 @@ public class TicketService {
         ticket.setSourceRefId(sourceRefId);
         ticket.setTriageId(triageId);
         ticket.setReporterId(userId);
-        ticket.setProjectId(request.projectId());
-        ticket.setBuildingId(request.buildingId());
-        ticket.setCustomerId(request.customerId());
-        ticket.setRoomId(request.roomId());
+        ticket.setProjectId(projectId);
+        ticket.setBuildingId(buildingId);
+        ticket.setCustomerId(customerId);
+        ticket.setRoomId(roomId);
         ticket.setEquipmentId(request.equipmentId());
         ticket.setServiceItemId(request.serviceItemId());
+        ticket.setServiceItemText(StringUtils.hasText(request.serviceItemText())
+                ? request.serviceItemText().trim() : null);
         ticket.setWorkflowId(request.workflowId());
         ticket.setCurrentNodeCode("ACCEPT");
         ticket.setAppointmentAt(parseOptionalUtc(request.appointmentAt()));
-        ticket.setContactName(StringUtils.hasText(request.contactName()) ? request.contactName().trim() : null);
+        ticket.setContactName(contactName);
+        ticket.setContactPhoneEnc(profile.phoneEnc());
+        ticket.setContactPhoneMask(profile.phoneMask());
         ticket.setAddressText(StringUtils.hasText(request.addressText()) ? request.addressText().trim() : null);
         ticket.setIndoorPublicArea(StringUtils.hasText(request.indoorPublicArea())
                 ? request.indoorPublicArea().trim().toUpperCase() : null);
+        ticket.setLocationType(StringUtils.hasText(request.locationType())
+                ? request.locationType().trim().toUpperCase() : null);
         ticket.setLocationText(request.locationText());
         ticket.setSlaResponseBreached(0);
         ticket.setSlaResolveBreached(0);
@@ -345,6 +362,8 @@ public class TicketService {
         LocalDateTime holdStartedAt = ticket.getHoldStartedAt();
         String holdReason = ticket.getHoldReason();
         Integer holdMinutes = ticket.getHoldMinutes();
+        String onsiteSituation = ticket.getOnsiteSituation();
+        String serviceItemText = ticket.getServiceItemText();
         LocalDateTime slaResponseDueAt = ticket.getSlaResponseDueAt();
         LocalDateTime slaResolveDueAt = ticket.getSlaResolveDueAt();
         String reason = request.reason();
@@ -363,8 +382,15 @@ public class TicketService {
             }
             case "resolve" -> {
                 requireStatus(from, Set.of("PROCESSING"), "当前状态不可提交解决");
+                if (!StringUtils.hasText(request.serviceItemText())) {
+                    throw new ApiException(ErrorCode.VALIDATION_ERROR, "服务项目不能为空");
+                }
                 to = "PENDING_VERIFY";
                 resolvedAt = now;
+                serviceItemText = request.serviceItemText().trim();
+                if (StringUtils.hasText(request.onsiteSituation())) {
+                    onsiteSituation = request.onsiteSituation().trim();
+                }
                 reason = reason == null ? "提交解决" : reason;
             }
             case "verify" -> {
@@ -441,6 +467,8 @@ public class TicketService {
                 .set(TicketEntity::getHoldStartedAt, holdStartedAt)
                 .set(TicketEntity::getHoldReason, holdReason)
                 .set(TicketEntity::getHoldMinutes, holdMinutes)
+                .set(TicketEntity::getOnsiteSituation, onsiteSituation)
+                .set(TicketEntity::getServiceItemText, serviceItemText)
                 .set(TicketEntity::getSlaResponseDueAt, slaResponseDueAt)
                 .set(TicketEntity::getSlaResolveDueAt, slaResolveDueAt)
                 .set(TicketEntity::getUpdatedBy, userId);
@@ -583,7 +611,10 @@ public class TicketService {
                 ticket.getContactName(),
                 ticket.getContactPhoneMask(),
                 ticket.getAddressText(),
-                ticket.getIndoorPublicArea()
+                ticket.getIndoorPublicArea(),
+                ticket.getLocationType(),
+                ticket.getServiceItemText(),
+                ticket.getOnsiteSituation()
         );
     }
 
@@ -653,7 +684,9 @@ public class TicketService {
                 safe(request.appointmentAt()),
                 safe(request.contactName()),
                 safe(request.addressText()),
-                safe(request.indoorPublicArea()));
+                safe(request.indoorPublicArea()),
+                safe(request.locationType()),
+                safe(request.serviceItemText()));
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(raw.getBytes(StandardCharsets.UTF_8)));
@@ -664,6 +697,22 @@ public class TicketService {
 
     private String safe(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private String defaultTitle(String description) {
+        if (!StringUtils.hasText(description)) {
+            return "报修工单";
+        }
+        String text = description.replaceAll("\\s+", " ").trim();
+        return text.length() > 40 ? text.substring(0, 40) : text;
+    }
+
+    private String firstText(String preferred, String fallback) {
+        return StringUtils.hasText(preferred) ? preferred.trim() : fallback;
+    }
+
+    private <T> T firstNonNull(T preferred, T fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
     private String toResponseJson(long ticketId, String ticketNo) {

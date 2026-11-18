@@ -247,7 +247,8 @@ def main() -> int:
                 if engineer_token:
                     transition(client, engineer_token, str(ticket_id), "accept", {})
                     transition(client, engineer_token, str(ticket_id), "resolve",
-                               {"reason": "E2E：现场已恢复，门锁检查正常"})
+                               {"reason": "E2E：现场已恢复，门锁检查正常",
+                                "serviceItemText": "电梯困人现场处置"})
                     transition(client, admin, str(ticket_id), "verify", {"approved": True})
                     transition(client, admin, str(ticket_id), "close",
                                {"closeReasonCode": "SOLVED"})

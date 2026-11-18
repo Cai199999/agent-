@@ -324,7 +324,7 @@ public class ChatToolCallService {
                 StringUtils.hasText(priority) ? priority.trim().toUpperCase() : "NORMAL",
                 StringUtils.hasText(location) ? location.trim() : null,
                 null, null, null,
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null, null
         );
     }
 

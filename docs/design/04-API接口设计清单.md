@@ -372,6 +372,8 @@
 | POST | `/api/v1/auth/logout` | 登出 | 已登录 | P0 |
 | GET | `/api/v1/auth/me` | 当前用户与权限 | 已登录 | P0 |
 | GET | `/api/v1/users/options` | 派单可选处理人 | `ticket:read` | P0 |
+| GET | `/api/v1/profile` | 当前用户个人资料 | 已登录 | P0 |
+| PUT | `/api/v1/profile` | 更新联系人/电话/项目/楼宇/房间/客户 | `ticket:create` | P0 |
 | PUT | `/api/v1/auth/password` | 修改密码 | 已登录 | P1 |
 | GET | `/api/v1/users` | 用户列表 | `admin:user` | P1 |
 | POST | `/api/v1/users` | 新增用户 | `admin:user` | P1 |
@@ -413,6 +415,10 @@
 | POST | `/api/v1/tickets/{id}/comments` | 添加评论 | `ticket:read` | P0 |
 | POST | `/api/v1/tickets/{id}/attachments` | 上传附件 | `ticket:update` | P0 |
 | DELETE | `/api/v1/tickets/{id}/attachments/{attachmentId}` | 删除附件 | `ticket:update` | P0 |
+| GET | `/api/v1/tickets/{id}/materials` | 使用材料列表 | `ticket:read` | P0 |
+| POST | `/api/v1/tickets/{id}/materials` | 添加使用材料 | `ticket:handle` | P0 |
+| GET | `/api/v1/tickets/{id}/visits` | 回访记录列表 | `ticket:read` | P0 |
+| POST | `/api/v1/tickets/{id}/visits` | 登记回访 | `ticket:close` | P0 |
 | POST | `/api/v1/tickets/{id}/satisfaction` | 满意度评价 | `ticket:evaluate` | P1 |
 | GET | `/api/v1/tickets/{id}/trace` | 建单溯源 | `ticket:read` | P0 |
 
@@ -539,7 +545,7 @@
 | 项 | 数量 / 说明 |
 |---|---|
 | 本文档设计接口 | 约 251 条（含 P1/P2 规划） |
-| Java 已实现映射 | 56 个注解（含内部接口与健康检查；一个映射可含多个路径） |
+| Java 已实现映射 | 62 个注解（含内部接口与健康检查；一个映射可含多个路径） |
 | Python 已实现路由 | 10 个（对话、分诊、分析、知识、向量、健康） |
 | 本次补录 | `GET /api/v1/users/options`、`GET /api/v1/health/ai`、`GET /internal/v1/tickets/similar`、`POST /internal/v1/knowledge/search` |
 | 设计已列但未实现 | P1/P2 接口（报表、系统管理、业户/设备、通知 SSE、抢单池等），前端暂无入口 |

@@ -261,7 +261,7 @@ public class TriageService {
                 overrides == null ? null : overrides.customerId(),
                 overrides == null ? null : overrides.roomId(),
                 overrides == null ? null : overrides.equipmentId(),
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null, null
         );
     }
 

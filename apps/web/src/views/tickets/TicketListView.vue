@@ -159,94 +159,70 @@
       />
     </el-card>
 
-    <el-dialog v-model="createVisible" title="新建工单" width="640px">
+    <el-dialog v-model="createVisible" title="报修 / 报事" width="640px">
       <el-form v-loading="masterDataLoading" :model="createForm" label-width="100px">
-        <el-form-item label="标题" required>
-          <el-input v-model="createForm.title" maxlength="200" />
+        <el-form-item label="报修人">
+          <span>{{ profile.contactName || auth.user?.displayName || "-" }}</span>
+          <span v-if="profile.phoneMask" class="muted profile-phone">{{ profile.phoneMask }}</span>
+          <router-link to="/profile" class="profile-link">完善个人信息</router-link>
         </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="createForm.description" type="textarea" :rows="3" />
+        <el-form-item label="描述" required>
+          <el-input
+            v-model="createForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="2000"
+            show-word-limit
+            placeholder="请描述故障现象、影响范围，标题会根据描述自动生成"
+          />
         </el-form-item>
         <el-form-item label="类型" required>
           <el-select v-model="createForm.ticketTypeCode" style="width: 100%">
             <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="优先级">
-          <el-select v-model="createForm.priorityCode" style="width: 100%">
-            <el-option label="紧急" value="URGENT" />
-            <el-option label="高" value="HIGH" />
-            <el-option label="普通" value="NORMAL" />
-            <el-option label="低" value="LOW" />
-          </el-select>
+        <el-form-item label="位置类型" required>
+          <el-radio-group v-model="createForm.locationType" @change="onLocationTypeChange">
+            <el-radio-button label="INDOOR">室内</el-radio-button>
+            <el-radio-button label="OUTDOOR">室外</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="项目">
-          <el-select v-model="createForm.projectId" clearable style="width: 100%" @change="onProjectChange">
-            <el-option v-for="item in masterData.projects" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="楼宇">
-          <el-select v-model="createForm.buildingId" clearable style="width: 100%" @change="onBuildingChange">
-            <el-option v-for="item in buildingOptions" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="房间">
-          <el-select v-model="createForm.roomId" clearable style="width: 100%">
-            <el-option
-              v-for="item in roomOptions"
-              :key="item.id"
-              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="客户">
-          <el-select v-model="createForm.customerId" clearable style="width: 100%">
-            <el-option
-              v-for="item in customerOptions"
-              :key="item.id"
-              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="服务项目">
-          <el-select v-model="createForm.serviceItemId" clearable style="width: 100%">
-            <el-option v-for="item in masterData.serviceItems" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="设备">
-          <el-select v-model="createForm.equipmentId" clearable style="width: 100%">
-            <el-option
-              v-for="item in equipmentOptions"
-              :key="item.id"
-              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="位置">
-          <el-input v-model="createForm.locationText" placeholder="如 A栋2号梯" />
-        </el-form-item>
-        <el-form-item label="预约时间">
-          <el-date-picker
-            v-model="createForm.appointmentAt"
-            type="datetime"
-            placeholder="可选"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="联系人">
-          <el-input v-model="createForm.contactName" placeholder="默认取当前账号名称" />
+        <template v-if="createForm.locationType === 'INDOOR'">
+          <el-form-item label="楼宇" required>
+            <el-select v-model="createForm.buildingId" style="width: 100%" @change="onBuildingChange">
+              <el-option v-for="item in buildingOptions" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="房间" required>
+            <el-select v-model="createForm.roomId" style="width: 100%">
+              <el-option
+                v-for="item in roomOptions"
+                :key="item.id"
+                :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </template>
+        <el-form-item label="位置" required>
+          <el-input v-model="createForm.locationText" placeholder="如 A栋2号梯 / 东门地下车库" />
         </el-form-item>
         <el-form-item label="详细地址">
           <el-input v-model="createForm.addressText" placeholder="可选" />
         </el-form-item>
-        <el-form-item label="户内/公区">
-          <el-select v-model="createForm.indoorPublicArea" clearable style="width: 100%">
-            <el-option label="户内" value="INDOOR" />
-            <el-option label="公区" value="PUBLIC" />
-          </el-select>
+        <el-form-item label="现场图片">
+          <el-upload
+            v-model:file-list="createFileList"
+            list-type="picture-card"
+            accept="image/*"
+            :auto-upload="false"
+            multiple
+            :on-change="onCreateFileChange"
+            :on-remove="onCreateFileRemove"
+          >
+            <span class="upload-plus">+</span>
+          </el-upload>
+          <div class="muted upload-hint">可选，支持手机拍摄或相册选择</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -275,6 +251,102 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="resolveVisible" title="提交解决" width="560px">
+      <el-form label-width="100px">
+        <el-form-item label="服务项目" required>
+          <el-input v-model="resolveForm.serviceItemText" maxlength="200" placeholder="文字填写本次服务项目" />
+        </el-form-item>
+        <el-form-item label="现场情况">
+          <el-input
+            v-model="resolveForm.onsiteSituation"
+            type="textarea"
+            :rows="3"
+            maxlength="1000"
+            show-word-limit
+            placeholder="选填：现场现象、已做处理、遗留问题"
+          />
+        </el-form-item>
+        <el-form-item label="现场照片">
+          <input
+            ref="resolveCameraInput"
+            class="hidden-file"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            @change="onResolveCameraChange"
+          />
+          <el-button @click="triggerResolveCamera">拍摄照片</el-button>
+          <span class="upload-hint">已选 {{ resolveFiles.length }} 张（选填）</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resolveVisible = false">取消</el-button>
+        <el-button type="primary" :loading="resolving" @click="submitResolve">提交解决</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="materialVisible" title="添加材料" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="材料名称" required>
+          <el-input v-model="materialForm.materialName" maxlength="200" />
+        </el-form-item>
+        <el-form-item label="规格型号">
+          <el-input v-model="materialForm.specification" maxlength="200" />
+        </el-form-item>
+        <el-form-item label="数量">
+          <el-input-number v-model="materialForm.quantity" :min="0" :precision="3" />
+          <el-input v-model="materialForm.unit" placeholder="单位" style="width: 100px; margin-left: 8px" />
+        </el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="materialForm.amount" :min="0" :precision="2" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="materialForm.remark" type="textarea" :rows="2" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="materialVisible = false">取消</el-button>
+        <el-button type="primary" :loading="materialSaving" @click="saveMaterial">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="visitVisible" title="登记回访" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="是否回访">
+          <el-switch v-model="visitForm.required" />
+        </el-form-item>
+        <el-form-item label="回访方式">
+          <el-select v-model="visitForm.visitMethod" style="width: 100%">
+            <el-option label="电话" value="PHONE" />
+            <el-option label="上门" value="VISIT" />
+            <el-option label="微信" value="WECHAT" />
+            <el-option label="其他" value="OTHER" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="回访时间">
+          <el-date-picker v-model="visitForm.visitedAt" type="datetime" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="回访结果">
+          <el-input v-model="visitForm.visitResult" type="textarea" :rows="3" maxlength="500" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="visitForm.status" style="width: 100%">
+            <el-option label="已完成" value="DONE" />
+            <el-option label="未接通" value="FAILED" />
+            <el-option label="待回访" value="PENDING" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="visitForm.remark" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="visitVisible = false">取消</el-button>
+        <el-button type="primary" :loading="visitSaving" @click="saveVisit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="detailVisible" title="工单详情" size="50%">
       <div v-loading="detailLoading">
         <template v-if="detail">
@@ -294,11 +366,12 @@
             <el-descriptions-item label="报障人">{{ detail.reporterName || detail.ticket.reporterId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="处理人">{{ detail.assigneeName || detail.ticket.assigneeId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="位置">{{ detail.ticket.locationText || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="室内/室外">{{ locationTypeLabel(detail.ticket.locationType) }}</el-descriptions-item>
             <el-descriptions-item label="项目">{{ masterName(masterData.projects, detail.ticket.projectId) }}</el-descriptions-item>
             <el-descriptions-item label="楼宇">{{ masterName(masterData.buildings, detail.ticket.buildingId) }}</el-descriptions-item>
             <el-descriptions-item label="房间">{{ masterName(masterData.rooms, detail.ticket.roomId) }}</el-descriptions-item>
             <el-descriptions-item label="客户">{{ masterName(masterData.customers, detail.ticket.customerId) }}</el-descriptions-item>
-            <el-descriptions-item label="服务项目">{{ masterName(masterData.serviceItems, detail.ticket.serviceItemId) }}</el-descriptions-item>
+            <el-descriptions-item label="服务项目">{{ detail.ticket.serviceItemText || masterName(masterData.serviceItems, detail.ticket.serviceItemId) }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ masterName(masterData.equipment, detail.ticket.equipmentId) }}</el-descriptions-item>
             <el-descriptions-item label="当前节点">{{ nodeLabel(detail.ticket.currentNodeCode) }}</el-descriptions-item>
             <el-descriptions-item label="预约时间">{{ formatTime(detail.ticket.appointmentAt) || "-" }}</el-descriptions-item>
@@ -307,6 +380,7 @@
             <el-descriptions-item label="联系人">{{ detail.ticket.contactName || "-" }}</el-descriptions-item>
             <el-descriptions-item label="联系电话">{{ detail.ticket.contactPhoneMask || "-" }}</el-descriptions-item>
             <el-descriptions-item label="户内/公区">{{ areaLabel(detail.ticket.indoorPublicArea) }}</el-descriptions-item>
+            <el-descriptions-item label="现场情况" :span="2">{{ detail.ticket.onsiteSituation || "-" }}</el-descriptions-item>
             <el-descriptions-item label="详细地址" :span="2">{{ detail.ticket.addressText || "-" }}</el-descriptions-item>
             <el-descriptions-item label="挂起累计">{{ detail.holdMinutes || 0 }} 分钟</el-descriptions-item>
             <el-descriptions-item label="首次响应到期">
@@ -359,6 +433,47 @@
                 </el-tag>
               </div>
             </template>
+          </div>
+
+          <el-divider content-position="left">使用材料</el-divider>
+          <div class="extra-list">
+            <el-empty v-if="!materials.length" description="暂无材料记录" :image-size="40" />
+            <div v-for="item in materials" :key="item.id" class="extra-row">
+              <span>{{ item.materialName }}</span>
+              <span class="muted">{{ item.specification || "" }}</span>
+              <span>{{ item.quantity || 0 }} {{ item.unit || "" }}</span>
+              <span v-if="item.amount != null">¥{{ item.amount }}</span>
+            </div>
+            <el-button
+              v-if="can('ticket:handle')"
+              size="small"
+              type="primary"
+              plain
+              @click="openMaterial"
+            >
+              添加材料
+            </el-button>
+          </div>
+
+          <el-divider content-position="left">回访记录</el-divider>
+          <div class="extra-list">
+            <el-empty v-if="!visits.length" description="暂无回访记录" :image-size="40" />
+            <div v-for="item in visits" :key="item.id" class="extra-row">
+              <el-tag size="small" :type="item.status === 'DONE' ? 'success' : 'info'">{{ item.status }}</el-tag>
+              <span>{{ item.visitMethod || "-" }}</span>
+              <span>{{ item.visitorName || item.visitorId || "-" }}</span>
+              <span>{{ formatTime(item.visitedAt) }}</span>
+              <span class="muted">{{ item.visitResult || item.remark || "" }}</span>
+            </div>
+            <el-button
+              v-if="detail.ticket.statusCode === 'CLOSED' && can('ticket:close')"
+              size="small"
+              type="primary"
+              plain
+              @click="openVisit"
+            >
+              登记回访
+            </el-button>
           </div>
 
           <el-divider content-position="left">相似历史工单</el-divider>
@@ -433,6 +548,15 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { http, toErrorMessage } from "@/api/http";
 import { getMasterDataOptions, type MasterDataOptions } from "@/api/masterData";
+import { getProfile, type UserProfile } from "@/api/profile";
+import {
+  addMaterial,
+  addVisit,
+  listMaterials,
+  listVisits,
+  type TicketMaterial,
+  type TicketVisit,
+} from "@/api/ticketExtras";
 import { useAuthStore } from "@/stores/auth";
 
 interface TicketSummary {
@@ -463,6 +587,9 @@ interface TicketSummary {
   contactPhoneMask?: string | null;
   addressText?: string | null;
   indoorPublicArea?: string | null;
+  locationType?: string | null;
+  serviceItemText?: string | null;
+  onsiteSituation?: string | null;
 }
 
 interface TicketEventView {
@@ -582,6 +709,34 @@ const assignVisible = ref(false);
 const assignRow = ref<TicketSummary | null>(null);
 const assignAssigneeId = ref("");
 const assigning = ref(false);
+const resolveVisible = ref(false);
+const resolveRow = ref<TicketSummary | null>(null);
+const resolving = ref(false);
+const resolveCameraInput = ref<HTMLInputElement | null>(null);
+const resolveFiles = ref<File[]>([]);
+const resolveForm = reactive({ serviceItemText: "", onsiteSituation: "" });
+const materials = ref<TicketMaterial[]>([]);
+const visits = ref<TicketVisit[]>([]);
+const materialVisible = ref(false);
+const materialSaving = ref(false);
+const visitVisible = ref(false);
+const visitSaving = ref(false);
+const materialForm = reactive({
+  materialName: "",
+  specification: "",
+  quantity: 1,
+  unit: "",
+  amount: null as number | null,
+  remark: "",
+});
+const visitForm = reactive({
+  required: true,
+  visitMethod: "PHONE",
+  visitedAt: null as Date | null,
+  visitResult: "",
+  status: "DONE",
+  remark: "",
+});
 
 const filters = reactive({
   keyword: "",
@@ -616,22 +771,18 @@ const typeOptions = [
 ];
 
 const createForm = reactive({
-  title: "",
   description: "",
   ticketTypeCode: "ELEVATOR",
-  priorityCode: "NORMAL",
+  locationType: "INDOOR",
   locationText: "",
-  projectId: "",
   buildingId: "",
   roomId: "",
-  customerId: "",
-  equipmentId: "",
-  serviceItemId: "",
-  appointmentAt: null as Date | null,
-  contactName: "",
   addressText: "",
-  indoorPublicArea: "",
 });
+
+const profile = ref<UserProfile>({});
+const createFileList = ref<any[]>([]);
+const createFiles = ref<File[]>([]);
 
 const masterData = ref<MasterDataOptions>({
   projects: [],
@@ -644,28 +795,35 @@ const masterData = ref<MasterDataOptions>({
 const masterDataLoading = ref(false);
 
 const buildingOptions = computed(() =>
-  masterData.value.buildings.filter((item) => !createForm.projectId || item.parentId === createForm.projectId),
+  masterData.value.buildings.filter((item) => !profile.value.projectId || item.parentId === profile.value.projectId),
 );
 const roomOptions = computed(() =>
   masterData.value.rooms.filter((item) => !createForm.buildingId || item.parentId === createForm.buildingId),
 );
-const customerOptions = computed(() =>
-  masterData.value.customers.filter((item) => !createForm.projectId || item.parentId === createForm.projectId),
-);
-const equipmentOptions = computed(() =>
-  masterData.value.equipment.filter((item) => !createForm.buildingId || item.parentId === createForm.buildingId),
-);
 
-function onProjectChange(): void {
-  createForm.buildingId = "";
-  createForm.roomId = "";
-  createForm.customerId = "";
-  createForm.equipmentId = "";
+function onLocationTypeChange(): void {
+  if (createForm.locationType === "OUTDOOR") {
+    createForm.buildingId = "";
+    createForm.roomId = "";
+  }
+}
+
+function onCreateFileChange(file: any): void {
+  if (file.raw && file.raw.type?.startsWith("image/")) {
+    if (!createFiles.value.some((item) => item.name === file.name && item.size === file.raw.size)) {
+      createFiles.value.push(file.raw);
+    }
+  }
+}
+
+function onCreateFileRemove(file: any): void {
+  createFiles.value = createFiles.value.filter(
+    (item) => !(item.name === file.name && item.size === file.raw?.size),
+  );
 }
 
 function onBuildingChange(): void {
   createForm.roomId = "";
-  createForm.equipmentId = "";
 }
 
 async function loadMasterData(): Promise<void> {
@@ -703,6 +861,10 @@ function nodeLabel(code?: string | null): string {
 
 function areaLabel(code?: string | null): string {
   return code === "INDOOR" ? "户内" : code === "PUBLIC" ? "公区" : "-";
+}
+
+function locationTypeLabel(code?: string | null): string {
+  return code === "INDOOR" ? "室内" : code === "OUTDOOR" ? "室外" : "-";
 }
 
 function statusLabel(status: string): string {
@@ -911,35 +1073,60 @@ async function resume(row: TicketSummary): Promise<void> {
 }
 
 function resetCreateForm(): void {
-  createForm.title = "";
   createForm.description = "";
   createForm.ticketTypeCode = "ELEVATOR";
-  createForm.priorityCode = "NORMAL";
+  createForm.locationType = "INDOOR";
   createForm.locationText = "";
-  createForm.projectId = "";
   createForm.buildingId = "";
   createForm.roomId = "";
-  createForm.customerId = "";
-  createForm.equipmentId = "";
-  createForm.serviceItemId = "";
-  createForm.appointmentAt = null;
-  createForm.contactName = auth.user?.displayName || "";
   createForm.addressText = "";
-  createForm.indoorPublicArea = "";
+  createFileList.value = [];
+  createFiles.value = [];
+}
+
+async function loadProfile(): Promise<void> {
+  try {
+    profile.value = await getProfile();
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "加载个人资料失败"));
+  }
 }
 
 function openCreate(): void {
   idempotencyKey.value = crypto.randomUUID();
-  if (!createForm.contactName) {
-    createForm.contactName = auth.user?.displayName || "";
-  }
+  void loadProfile();
   void loadMasterData();
   createVisible.value = true;
 }
 
+async function uploadTicketFiles(ticketId: string, files: File[]): Promise<void> {
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const body = (await http.post(`/tickets/${ticketId}/attachments`, form)) as any;
+      if (body.code !== 0) throw new Error(body.message);
+    } catch (error: any) {
+      ElMessage.warning(toErrorMessage(error, `图片 ${file.name} 上传失败`));
+    }
+  }
+}
+
+async function uploadCreateFiles(ticketId: string): Promise<void> {
+  await uploadTicketFiles(ticketId, createFiles.value);
+}
+
 async function createTicket(): Promise<void> {
-  if (!createForm.title || !createForm.ticketTypeCode) {
-    ElMessage.warning("请填写标题和类型");
+  if (!createForm.description.trim() || !createForm.ticketTypeCode) {
+    ElMessage.warning("请填写描述和类型");
+    return;
+  }
+  if (!createForm.locationType || !createForm.locationText.trim()) {
+    ElMessage.warning("请选择室内/室外并填写位置");
+    return;
+  }
+  if (createForm.locationType === "INDOOR" && (!createForm.buildingId || !createForm.roomId)) {
+    ElMessage.warning("室内报修请选择楼宇和房间");
     return;
   }
   if (!idempotencyKey.value) {
@@ -948,20 +1135,23 @@ async function createTicket(): Promise<void> {
   creating.value = true;
   try {
     const payload = {
-      ...createForm,
-      projectId: createForm.projectId || null,
-      buildingId: createForm.buildingId || null,
-      roomId: createForm.roomId || null,
-      customerId: createForm.customerId || null,
-      equipmentId: createForm.equipmentId || null,
-      serviceItemId: createForm.serviceItemId || null,
-      appointmentAt: createForm.appointmentAt ? createForm.appointmentAt.toISOString() : null,
-      indoorPublicArea: createForm.indoorPublicArea || null,
+      description: createForm.description.trim(),
+      ticketTypeCode: createForm.ticketTypeCode,
+      priorityCode: "NORMAL",
+      locationType: createForm.locationType,
+      locationText: createForm.locationText.trim(),
+      buildingId: createForm.locationType === "INDOOR" ? createForm.buildingId || null : null,
+      roomId: createForm.locationType === "INDOOR" ? createForm.roomId || null : null,
+      addressText: createForm.addressText.trim() || null,
     };
     const body = (await http.post("/tickets", payload, {
       headers: { "Idempotency-Key": idempotencyKey.value },
     })) as any;
     if (body.code !== 0) throw new Error(body.message);
+    const ticketId = body.data.ticket.id;
+    if (createFiles.value.length) {
+      await uploadCreateFiles(ticketId);
+    }
     ElMessage.success(`工单已创建：${body.data.ticket.ticketNo}`);
     createVisible.value = false;
     idempotencyKey.value = "";
@@ -988,18 +1178,124 @@ async function performAction(row: TicketSummary, action: string, payload: Record
   }
 }
 
-async function resolve(row: TicketSummary): Promise<void> {
+function resolve(row: TicketSummary): void {
+  resolveRow.value = row;
+  resolveForm.serviceItemText = "";
+  resolveForm.onsiteSituation = "";
+  resolveFiles.value = [];
+  resolveVisible.value = true;
+}
+
+function triggerResolveCamera(): void {
+  resolveCameraInput.value?.click();
+}
+
+function onResolveCameraChange(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  for (const file of Array.from(input.files || [])) {
+    if (file.type.startsWith("image/")) {
+      resolveFiles.value.push(file);
+    }
+  }
+  input.value = "";
+}
+
+async function submitResolve(): Promise<void> {
+  if (!resolveRow.value) return;
+  if (!resolveForm.serviceItemText.trim()) {
+    ElMessage.warning("请填写服务项目");
+    return;
+  }
+  resolving.value = true;
   try {
-    const result = await ElMessageBox.prompt("请输入处理结果", "提交解决", {
-      inputType: "textarea",
-      inputPlaceholder: "例如：更换轴承并试运行",
-    });
-    await performAction(row, "resolve", {
+    const row = resolveRow.value;
+    const body = (await http.post(`/tickets/${row.id}/resolve`, {
       expectedVersion: row.version,
-      reason: result.value,
+      serviceItemText: resolveForm.serviceItemText.trim(),
+      onsiteSituation: resolveForm.onsiteSituation.trim() || null,
+      reason: resolveForm.onsiteSituation.trim() || "提交解决",
+    })) as any;
+    if (body.code !== 0) throw new Error(body.message);
+    if (resolveFiles.value.length) {
+      await uploadTicketFiles(row.id, resolveFiles.value);
+    }
+    ElMessage.success("已提交解决");
+    resolveVisible.value = false;
+    await load();
+    if (detailVisible.value && detail.value?.ticket.id === row.id) {
+      await openDetail(row);
+    }
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "提交解决失败"));
+  } finally {
+    resolving.value = false;
+  }
+}
+
+function openMaterial(): void {
+  materialForm.materialName = "";
+  materialForm.specification = "";
+  materialForm.quantity = 1;
+  materialForm.unit = "";
+  materialForm.amount = null;
+  materialForm.remark = "";
+  materialVisible.value = true;
+}
+
+async function saveMaterial(): Promise<void> {
+  if (!detail.value || !materialForm.materialName.trim()) {
+    ElMessage.warning("请填写材料名称");
+    return;
+  }
+  materialSaving.value = true;
+  try {
+    await addMaterial(detail.value.ticket.id, {
+      materialName: materialForm.materialName.trim(),
+      specification: materialForm.specification.trim() || null,
+      quantity: materialForm.quantity,
+      unit: materialForm.unit.trim() || null,
+      amount: materialForm.amount,
+      remark: materialForm.remark.trim() || null,
     });
-  } catch {
-    // 用户取消
+    materials.value = await listMaterials(detail.value.ticket.id);
+    materialVisible.value = false;
+    ElMessage.success("材料已记录");
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "保存材料失败"));
+  } finally {
+    materialSaving.value = false;
+  }
+}
+
+function openVisit(): void {
+  visitForm.required = true;
+  visitForm.visitMethod = "PHONE";
+  visitForm.visitedAt = new Date();
+  visitForm.visitResult = "";
+  visitForm.status = "DONE";
+  visitForm.remark = "";
+  visitVisible.value = true;
+}
+
+async function saveVisit(): Promise<void> {
+  if (!detail.value) return;
+  visitSaving.value = true;
+  try {
+    await addVisit(detail.value.ticket.id, {
+      required: visitForm.required,
+      visitMethod: visitForm.visitMethod,
+      visitedAt: visitForm.visitedAt?.toISOString() || null,
+      visitResult: visitForm.visitResult.trim() || null,
+      status: visitForm.status,
+      remark: visitForm.remark.trim() || null,
+    });
+    visits.value = await listVisits(detail.value.ticket.id);
+    visitVisible.value = false;
+    ElMessage.success("回访记录已保存");
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "保存回访失败"));
+  } finally {
+    visitSaving.value = false;
   }
 }
 
@@ -1028,12 +1324,15 @@ async function openDetail(row: TicketSummary): Promise<void> {
   commentText.value = "";
   internalNote.value = false;
   try {
-    const [detailBody, commentsBody, attachmentsBody, similarBody, analysisBody] = (await Promise.all([
+    const [detailBody, commentsBody, attachmentsBody, similarBody, analysisBody,
+      materialsBody, visitsBody] = (await Promise.all([
       http.get(`/tickets/${row.id}`),
       http.get(`/tickets/${row.id}/comments`),
       http.get(`/tickets/${row.id}/attachments`),
       http.get(`/tickets/${row.id}/similar`, { params: { topK: 5 } }).catch(() => null),
       http.get(`/tickets/${row.id}/ai-analysis`).catch(() => null),
+      http.get(`/tickets/${row.id}/materials`).catch(() => null),
+      http.get(`/tickets/${row.id}/visits`).catch(() => null),
     ])) as any[];
     if (detailBody.code !== 0) throw new Error(detailBody.message);
     if (commentsBody.code !== 0) throw new Error(commentsBody.message);
@@ -1043,6 +1342,8 @@ async function openDetail(row: TicketSummary): Promise<void> {
     attachments.value = attachmentsBody.data || [];
     similarTickets.value = similarBody?.code === 0 ? (similarBody.data || []) : [];
     aiAnalysis.value = analysisBody?.code === 0 ? (analysisBody.data || null) : null;
+    materials.value = materialsBody?.code === 0 ? (materialsBody.data || []) : [];
+    visits.value = visitsBody?.code === 0 ? (visitsBody.data || []) : [];
   } catch (error: any) {
     ElMessage.error(toErrorMessage(error, "加载详情失败"));
   } finally {
@@ -1154,6 +1455,7 @@ async function addComment(): Promise<void> {
 onMounted(() => {
   void load();
   void loadMasterData();
+  void loadProfile();
   if (route.query.create === "1") {
     openCreate();
     void router.replace({ path: "/tickets" });
@@ -1172,6 +1474,46 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.profile-phone {
+  margin-left: 10px;
+  color: #909399;
+  font-size: 12px;
+}
+.profile-link {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #409eff;
+}
+.upload-plus {
+  font-size: 28px;
+  line-height: 1;
+  color: #909399;
+}
+.upload-hint {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+.hidden-file {
+  display: none;
+}
+.extra-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.extra-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: #303133;
+}
+.muted {
+  color: #909399;
 }
 .similar-list {
   min-height: 60px;
