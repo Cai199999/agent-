@@ -231,6 +231,7 @@ agent-gongdan/
 - [03 数据库设计文档](docs/design/03-数据库设计文档.md)
 - [04 API 接口设计清单](docs/design/04-API接口设计清单.md)
 - [05 最终设计方案与开发规范](docs/design/05-最终设计方案与开发规范.md)
+- [06 终极目标与能力评估](docs/design/06-终极目标与能力评估.md)
 - [E2E 验收测试指南](docs/reports/E2E验收测试指南.md)
 - [E2E 半自动化操作清单](docs/reports/E2E半自动化操作清单.md)
 - [M8 降级演练报告](docs/reports/2026-11-18-M8降级自查与演练报告.md)

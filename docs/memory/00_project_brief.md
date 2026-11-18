@@ -23,6 +23,11 @@
 - Phase 1 进行中：三端骨架、健康检查、Flyway V1–V11、Sa-Token JWT 认证闭环已完成（33 张业务表，0 物理外键；dev admin 登录/JWT/`/me` 已验证）；工单后端与前端最小闭环、建单幂等、审计日志、评论、MinIO 附件、知识库/RAG 检索、AI 对话（RAG 增强 + POST SSE + 消息/引用落库）、分诊与工单草稿确认（人在回路、`chat_session_ticket` 关联）、Agent 工具平台最小闭环（工具注册、只读工具、`ticket_create` 二次确认、`chat_tool_call` 轨迹）、工单筛选/派单/挂起恢复/SLA 顺延、站内通知（轮询）、历史工单向量化与相似工单检索（`ticket_similar` 工具）、工单 AI 分析（带知识引用）、知识下载/删除、管理员一键结束、登录态 localStorage 持久化、快捷能力卡片与处理过程时间线已接入；M8 轻量降级已落地（`AiAvailabilityGuard` 自愈熔断、规则分诊兜底、前端转表单入口、`/api/v1/health/ai`），演练报告见 `docs/reports/2026-11-18-M8降级自查与演练报告.md`。
 - Agent 工具平台：05 附录 F 已登记演进蓝图（设计预留、代码后置）；Python 仅保留 `domain/tool.py` 与 `app/ports.py` 契约占位，不做工具实现。
 
+## 终极目标
+
+- 以 `docs/design/06-终极目标与能力评估.md` 为长期能力基线：真实业务任务、完整后端工程、Agent 规划、上下文与记忆、评估与可观测、人机协同。
+- 当前为 v1 可演示/可试用版本，综合评估约 5/10，后续迭代必须对齐六项能力并有量化证据。
+
 ## 关键约束
 
 - 严格隔离：不触碰 `~/Workspace/` 下其他项目；共享中间件只读。
