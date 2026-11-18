@@ -3,7 +3,7 @@
 > 项目：IT 运维工单智能 Agent（agent-gongdan）
 > 日期：2026-11-18
 > 适用对象：未来大项目 / Orchestrator / 其他 Agent
-> 当前版本：P1（Manifest + 只读/写任务 + 确认令牌 + 任务持久化）
+> 当前版本：P2（Manifest 0.3.0 + 只读/写任务 + 确认令牌 + 任务持久化 + 取消 + 工单生命周期写能力）
 
 ---
 
@@ -146,6 +146,18 @@ GET /agent/v1/tasks/{taskId}
 | `knowledge.search` | `query`、`topK`、`categoryCode` | 知识库检索 |
 | `ticket.create` | `description`、`ticketTypeCode`、`locationType`、`locationText`、`buildingId`、`roomId` 等 | 建单，需确认 |
 | `ticket.export` | `startTime`、`endTime`、`status` 等 | 导出，需确认 |
+| `ticket.assign` | `ticketId`、`assigneeId` | 派单，需确认 |
+| `ticket.accept` | `ticketId` | 接单，需确认 |
+| `ticket.resolve` | `ticketId`、`serviceItemText`、`onsiteSituation` | 提交解决，需确认；需已有 ONSITE 照片 |
+| `ticket.verify` | `ticketId`、`approved` | 验证，需确认 |
+| `ticket.close` | `ticketId`、`closeReasonCode` | 关闭，需确认 |
+| `ticket.cancel` | `ticketId`、`cancelReason` | 取消，需确认 |
+| `ticket.hold` | `ticketId`、`reason` | 挂起，需确认 |
+| `ticket.resume` | `ticketId`、`reason` | 恢复，需确认 |
+| `ticket.finish` | `ticketId`、`reason` | 结束，需确认 |
+| `ticket.comment.add` | `ticketId`、`content`、`visibility` | 评论，需确认 |
+| `ticket.material.add` | `ticketId`、`materialName`、`quantity`、`unit`、`amount` | 材料，需确认 |
+| `ticket.visit.add` | `ticketId`、`visitMethod`、`visitResult`、`status` | 回访，需确认 |
 
 只读能力立即返回 `SUCCEEDED` 或 `FAILED`；
 写能力返回 `WAITING_CONFIRM`，需确认后执行。
@@ -196,8 +208,17 @@ Content-Type: application/json
 
 当前已支持：
 
-- `ticket.create`
-- `ticket.export`
+- 建单、导出；
+- 派单、接单、解决、验证、关闭、取消、挂起、恢复、结束；
+- 评论、材料、回访。
+
+取消：
+
+```http
+POST /agent/v1/tasks/{taskId}/cancel
+```
+
+仅 `PENDING/RUNNING/WAITING_CONFIRM` 可取消。
 
 ---
 
@@ -231,7 +252,6 @@ curl -X POST http://127.0.0.1:8200/agent/v1/tasks \
 ## 11. 当前限制
 
 - 无异步任务队列/事件流；
-- 不支持取消；
 - 未记录 token/成本字段；
 - 未独立部署；
 - 未提供 SDK，直接 HTTP 调用；

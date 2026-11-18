@@ -431,6 +431,27 @@ apps/python-ai/.venv/bin/python scripts/e2e/agent_p1_smoke.py
 - 独立部署；
 - 更多写工具（派单/解决/材料/回访）。
 
+### 9.6 P2 实现记录（2026-11-18）
+
+- Manifest 升级至 `0.3.0`；
+- 新增写能力：
+  - `ticket.assign` / `accept` / `resolve` / `verify` / `close` / `cancel`
+  - `ticket.hold` / `resume` / `finish`
+  - `ticket.comment.add` / `ticket.material.add` / `ticket.visit.add`
+- 所有写能力 `requiresConfirm=true`；
+- 新增 `POST /agent/v1/tasks/{taskId}/cancel`；
+- 写操作复用现有 `TicketService` / `TicketAccessService` / 材料/回访服务；
+- 票级权限、状态机、审计不变。
+
+验证：
+
+```bash
+apps/python-ai/.venv/bin/python scripts/e2e/agent_p2_smoke.py
+# passed=7 failed=0 total=7
+```
+
+仍未做：异步任务、事件流、token/成本、独立部署、附件上传工具。
+
 ---
 
 ## 10. 结论

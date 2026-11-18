@@ -566,8 +566,9 @@
 | POST | `/agent/v1/tasks` | 提交只读/写任务 | `ticket.query` / `ticket.detail` / `ticket.similar` / `knowledge.search` / `ticket.create` / `ticket.export` |
 | GET | `/agent/v1/tasks/{taskId}` | 查询任务结果 | 内部令牌 + 同 Actor |
 | POST | `/agent/v1/tasks/{taskId}/confirm` | 确认写任务 | 同 Actor + `confirmationToken` |
+| POST | `/agent/v1/tasks/{taskId}/cancel` | 取消任务 | 同 Actor |
 
-P1 已实现：`agent_task` 持久化、`ticket.create` / `ticket.export` 的 `WAITING_CONFIRM`、10 分钟一次性确认令牌。异步/取消/成本字段待补。
+P2 已实现：`agent_task` 持久化、建单/导出/派单/接单/解决/验证/关闭/取消/挂起/恢复/结束/评论/材料/回访、10 分钟一次性确认令牌、任务取消。异步/成本字段待补。
 
 ---
 

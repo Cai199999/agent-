@@ -57,6 +57,13 @@ public class AgentTaskController {
         return ApiResponse.ok(agentTaskService.get(taskId, actorId));
     }
 
+    @PostMapping("/tasks/{taskId}/cancel")
+    public ApiResponse<AgentTaskView> cancel(
+            @PathVariable String taskId,
+            @RequestAttribute("internalActorId") long actorId) {
+        return ApiResponse.ok(agentTaskService.cancel(taskId, actorId));
+    }
+
     @PostMapping("/tasks/{taskId}/confirm")
     public ApiResponse<AgentTaskView> confirm(
             @PathVariable String taskId,
