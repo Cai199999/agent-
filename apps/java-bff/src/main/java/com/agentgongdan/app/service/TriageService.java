@@ -260,7 +260,8 @@ public class TriageService {
                 StringUtils.hasText(location) ? location.trim() : null,
                 overrides == null ? null : overrides.customerId(),
                 overrides == null ? null : overrides.roomId(),
-                overrides == null ? null : overrides.equipmentId()
+                overrides == null ? null : overrides.equipmentId(),
+                null, null, null, null, null, null, null, null
         );
     }
 

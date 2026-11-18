@@ -10,6 +10,14 @@ public record CreateTicketRequest(
         String locationText,
         Long customerId,
         Long roomId,
-        Long equipmentId
+        Long equipmentId,
+        Long projectId,
+        Long buildingId,
+        Long serviceItemId,
+        Long workflowId,
+        String appointmentAt,
+        String contactName,
+        String addressText,
+        String indoorPublicArea
 ) {
 }

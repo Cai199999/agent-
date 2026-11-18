@@ -155,15 +155,26 @@ public class TicketService {
         ticket.setSourceRefId(sourceRefId);
         ticket.setTriageId(triageId);
         ticket.setReporterId(userId);
+        ticket.setProjectId(request.projectId());
+        ticket.setBuildingId(request.buildingId());
         ticket.setCustomerId(request.customerId());
         ticket.setRoomId(request.roomId());
         ticket.setEquipmentId(request.equipmentId());
+        ticket.setServiceItemId(request.serviceItemId());
+        ticket.setWorkflowId(request.workflowId());
+        ticket.setCurrentNodeCode("ACCEPT");
+        ticket.setAppointmentAt(parseOptionalUtc(request.appointmentAt()));
+        ticket.setContactName(StringUtils.hasText(request.contactName()) ? request.contactName().trim() : null);
+        ticket.setAddressText(StringUtils.hasText(request.addressText()) ? request.addressText().trim() : null);
+        ticket.setIndoorPublicArea(StringUtils.hasText(request.indoorPublicArea())
+                ? request.indoorPublicArea().trim().toUpperCase() : null);
         ticket.setLocationText(request.locationText());
         ticket.setSlaResponseBreached(0);
         ticket.setSlaResolveBreached(0);
         ticket.setHoldMinutes(0);
         ticket.setSlaResponseDueAt(now.plusHours("URGENT".equals(priority) ? 1 : 4));
         ticket.setSlaResolveDueAt(now.plusHours("URGENT".equals(priority) ? 4 : 24));
+        ticket.setTaskDueAt(ticket.getSlaResolveDueAt());
         ticket.setVersion(0);
         ticketMapper.insert(ticket);
 
@@ -592,6 +603,21 @@ public class TicketService {
         return value == null ? null : String.valueOf(value);
     }
 
+    private LocalDateTime parseOptionalUtc(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        } catch (Exception ignored) {
+            try {
+                return LocalDateTime.parse(value);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+
     private String iso(LocalDateTime value) {
         return value == null ? null
                 : value.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
@@ -607,7 +633,15 @@ public class TicketService {
                 safe(request.locationText()),
                 safe(request.customerId()),
                 safe(request.roomId()),
-                safe(request.equipmentId()));
+                safe(request.equipmentId()),
+                safe(request.projectId()),
+                safe(request.buildingId()),
+                safe(request.serviceItemId()),
+                safe(request.workflowId()),
+                safe(request.appointmentAt()),
+                safe(request.contactName()),
+                safe(request.addressText()),
+                safe(request.indoorPublicArea()));
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(raw.getBytes(StandardCharsets.UTF_8)));

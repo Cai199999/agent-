@@ -323,7 +323,8 @@ public class ChatToolCallService {
                 StringUtils.hasText(ticketType) ? ticketType.trim().toUpperCase() : "GENERAL",
                 StringUtils.hasText(priority) ? priority.trim().toUpperCase() : "NORMAL",
                 StringUtils.hasText(location) ? location.trim() : null,
-                null, null, null
+                null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 

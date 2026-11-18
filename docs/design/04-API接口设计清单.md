@@ -480,6 +480,7 @@
 
 | 方法 | 路径 | 用途 | 权限 | 优先级 |
 |---|---|---|---|---|
+| GET | `/api/v1/master-data/options` | 建单主数据选项（项目/楼宇/房间/客户/设备/服务项） | `ticket:read` | P0 |
 | GET | `/api/v1/customers` | 业户列表 | `customer:read` | P1 |
 | POST | `/api/v1/customers` | 新增业户 | `customer:manage` | P1 |
 | GET | `/api/v1/customers/{id}` | 业户详情 | `customer:read` | P1 |
@@ -538,7 +539,7 @@
 | 项 | 数量 / 说明 |
 |---|---|
 | 本文档设计接口 | 约 251 条（含 P1/P2 规划） |
-| Java 已实现映射 | 53 个注解（含内部接口与健康检查；一个映射可含多个路径） |
+| Java 已实现映射 | 56 个注解（含内部接口与健康检查；一个映射可含多个路径） |
 | Python 已实现路由 | 10 个（对话、分诊、分析、知识、向量、健康） |
 | 本次补录 | `GET /api/v1/users/options`、`GET /api/v1/health/ai`、`GET /internal/v1/tickets/similar`、`POST /internal/v1/knowledge/search` |
 | 设计已列但未实现 | P1/P2 接口（报表、系统管理、业户/设备、通知 SSE、抢单池等），前端暂无入口 |

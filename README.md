@@ -254,9 +254,10 @@ agent-gongdan/
 
 - 认证与权限、工单闭环、评论/附件、知识库/RAG、AI 对话、分诊草稿、Agent 工具、相似工单、通知轮询、工单 AI 分析、M8 轻量降级、Excel Phase A 导出、AI 自然语言导出（确认后生成）。
 - Phase 2 数据模型基础：`biz_project/building/room/customer/customer_room/equipment/service_item/workflow/workflow_node`、`ticket_material`、`ticket_visit` 与工单扩展字段（V12/V13）；dev 已 seed 演示主数据。
+- 主数据只读 API `/api/v1/master-data/options` 与建单表单级联已接入。
 
 暂未接入：
 
-- 主数据管理 API/UI、45 列完整导出、AI 聚合可视化报告、报表/系统管理页面、PDF/PPT 解析、完整用户画像与长期记忆。
+- 主数据 CRUD 管理页、45 列完整导出、AI 聚合可视化报告、报表/系统管理页面、PDF/PPT 解析、完整用户画像与长期记忆。
 
 > 详见 [05 技术债登记](docs/design/05-最终设计方案与开发规范.md) 的 TD01–TD16。

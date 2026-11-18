@@ -14,6 +14,8 @@ public class TicketEntity {
     @TableId(type = IdType.INPUT)
     private Long id;
     private Long tenantId;
+    private Long projectId;
+    private Long buildingId;
     private String ticketNo;
     private String title;
     private String description;
@@ -31,6 +33,18 @@ public class TicketEntity {
     private Long customerId;
     private Long roomId;
     private Long equipmentId;
+    private Long serviceItemId;
+    private Long workflowId;
+    private String currentNodeCode;
+    private LocalDateTime appointmentAt;
+    private LocalDateTime receivedAt;
+    private LocalDateTime arrivedAt;
+    private LocalDateTime taskDueAt;
+    private String contactName;
+    private String contactPhoneEnc;
+    private String contactPhoneMask;
+    private String addressText;
+    private String indoorPublicArea;
     private String locationText;
     private Long slaPolicyId;
     private LocalDateTime slaResponseDueAt;
@@ -46,6 +60,7 @@ public class TicketEntity {
     private LocalDateTime closedAt;
     private String closeReasonCode;
     private String cancelReason;
+    private String incompleteReasonCode;
     private Integer satisfactionScore;
     private String satisfactionComment;
     private Long ratedBy;

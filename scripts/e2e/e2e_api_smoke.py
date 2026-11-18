@@ -146,6 +146,17 @@ def main() -> int:
         admin = login(client, ADMIN_USER)
         if not admin:
             return 1
+        options = client.get(f"{BASE}/master-data/options",
+                             headers={"Authorization": f"Bearer {admin}"})
+        options_body = options.json() if options.status_code == 200 else {}
+        option_data = options_body.get("data") or {}
+        check("主数据选项",
+              options.status_code == 200
+              and bool(option_data.get("projects"))
+              and bool(option_data.get("buildings"))
+              and bool(option_data.get("serviceItems")),
+              f"http={options.status_code}")
+
         session_id = create_session(client, admin)
         if not session_id:
             return 1

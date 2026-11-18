@@ -159,8 +159,8 @@
       />
     </el-card>
 
-    <el-dialog v-model="createVisible" title="新建工单" width="560px">
-      <el-form :model="createForm" label-width="90px">
+    <el-dialog v-model="createVisible" title="新建工单" width="640px">
+      <el-form v-loading="masterDataLoading" :model="createForm" label-width="100px">
         <el-form-item label="标题" required>
           <el-input v-model="createForm.title" maxlength="200" />
         </el-form-item>
@@ -175,12 +175,78 @@
         <el-form-item label="优先级">
           <el-select v-model="createForm.priorityCode" style="width: 100%">
             <el-option label="紧急" value="URGENT" />
+            <el-option label="高" value="HIGH" />
             <el-option label="普通" value="NORMAL" />
             <el-option label="低" value="LOW" />
           </el-select>
         </el-form-item>
+        <el-form-item label="项目">
+          <el-select v-model="createForm.projectId" clearable style="width: 100%" @change="onProjectChange">
+            <el-option v-for="item in masterData.projects" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="楼宇">
+          <el-select v-model="createForm.buildingId" clearable style="width: 100%" @change="onBuildingChange">
+            <el-option v-for="item in buildingOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="房间">
+          <el-select v-model="createForm.roomId" clearable style="width: 100%">
+            <el-option
+              v-for="item in roomOptions"
+              :key="item.id"
+              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="客户">
+          <el-select v-model="createForm.customerId" clearable style="width: 100%">
+            <el-option
+              v-for="item in customerOptions"
+              :key="item.id"
+              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="服务项目">
+          <el-select v-model="createForm.serviceItemId" clearable style="width: 100%">
+            <el-option v-for="item in masterData.serviceItems" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="设备">
+          <el-select v-model="createForm.equipmentId" clearable style="width: 100%">
+            <el-option
+              v-for="item in equipmentOptions"
+              :key="item.id"
+              :label="`${item.name}${item.extra ? ' · ' + item.extra : ''}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="位置">
-          <el-input v-model="createForm.locationText" />
+          <el-input v-model="createForm.locationText" placeholder="如 A栋2号梯" />
+        </el-form-item>
+        <el-form-item label="预约时间">
+          <el-date-picker
+            v-model="createForm.appointmentAt"
+            type="datetime"
+            placeholder="可选"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="联系人">
+          <el-input v-model="createForm.contactName" placeholder="默认取当前账号名称" />
+        </el-form-item>
+        <el-form-item label="详细地址">
+          <el-input v-model="createForm.addressText" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="户内/公区">
+          <el-select v-model="createForm.indoorPublicArea" clearable style="width: 100%">
+            <el-option label="户内" value="INDOOR" />
+            <el-option label="公区" value="PUBLIC" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -348,10 +414,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { http, toErrorMessage } from "@/api/http";
+import { getMasterDataOptions, type MasterDataOptions } from "@/api/masterData";
 import { useAuthStore } from "@/stores/auth";
 
 interface TicketSummary {
@@ -525,7 +592,64 @@ const createForm = reactive({
   ticketTypeCode: "ELEVATOR",
   priorityCode: "NORMAL",
   locationText: "",
+  projectId: "",
+  buildingId: "",
+  roomId: "",
+  customerId: "",
+  equipmentId: "",
+  serviceItemId: "",
+  appointmentAt: null as Date | null,
+  contactName: "",
+  addressText: "",
+  indoorPublicArea: "",
 });
+
+const masterData = ref<MasterDataOptions>({
+  projects: [],
+  buildings: [],
+  rooms: [],
+  customers: [],
+  equipment: [],
+  serviceItems: [],
+});
+const masterDataLoading = ref(false);
+
+const buildingOptions = computed(() =>
+  masterData.value.buildings.filter((item) => !createForm.projectId || item.parentId === createForm.projectId),
+);
+const roomOptions = computed(() =>
+  masterData.value.rooms.filter((item) => !createForm.buildingId || item.parentId === createForm.buildingId),
+);
+const customerOptions = computed(() =>
+  masterData.value.customers.filter((item) => !createForm.projectId || item.parentId === createForm.projectId),
+);
+const equipmentOptions = computed(() =>
+  masterData.value.equipment.filter((item) => !createForm.buildingId || item.parentId === createForm.buildingId),
+);
+
+function onProjectChange(): void {
+  createForm.buildingId = "";
+  createForm.roomId = "";
+  createForm.customerId = "";
+  createForm.equipmentId = "";
+}
+
+function onBuildingChange(): void {
+  createForm.roomId = "";
+  createForm.equipmentId = "";
+}
+
+async function loadMasterData(): Promise<void> {
+  if (masterData.value.projects.length) return;
+  masterDataLoading.value = true;
+  try {
+    masterData.value = await getMasterDataOptions();
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "加载主数据失败"));
+  } finally {
+    masterDataLoading.value = false;
+  }
+}
 
 function can(permission: string): boolean {
   return auth.permissions.includes(permission);
@@ -736,8 +860,30 @@ async function resume(row: TicketSummary): Promise<void> {
   });
 }
 
+function resetCreateForm(): void {
+  createForm.title = "";
+  createForm.description = "";
+  createForm.ticketTypeCode = "ELEVATOR";
+  createForm.priorityCode = "NORMAL";
+  createForm.locationText = "";
+  createForm.projectId = "";
+  createForm.buildingId = "";
+  createForm.roomId = "";
+  createForm.customerId = "";
+  createForm.equipmentId = "";
+  createForm.serviceItemId = "";
+  createForm.appointmentAt = null;
+  createForm.contactName = auth.user?.displayName || "";
+  createForm.addressText = "";
+  createForm.indoorPublicArea = "";
+}
+
 function openCreate(): void {
   idempotencyKey.value = crypto.randomUUID();
+  if (!createForm.contactName) {
+    createForm.contactName = auth.user?.displayName || "";
+  }
+  void loadMasterData();
   createVisible.value = true;
 }
 
@@ -751,16 +897,25 @@ async function createTicket(): Promise<void> {
   }
   creating.value = true;
   try {
-    const body = (await http.post("/tickets", { ...createForm }, {
+    const payload = {
+      ...createForm,
+      projectId: createForm.projectId || null,
+      buildingId: createForm.buildingId || null,
+      roomId: createForm.roomId || null,
+      customerId: createForm.customerId || null,
+      equipmentId: createForm.equipmentId || null,
+      serviceItemId: createForm.serviceItemId || null,
+      appointmentAt: createForm.appointmentAt ? createForm.appointmentAt.toISOString() : null,
+      indoorPublicArea: createForm.indoorPublicArea || null,
+    };
+    const body = (await http.post("/tickets", payload, {
       headers: { "Idempotency-Key": idempotencyKey.value },
     })) as any;
     if (body.code !== 0) throw new Error(body.message);
     ElMessage.success(`工单已创建：${body.data.ticket.ticketNo}`);
     createVisible.value = false;
     idempotencyKey.value = "";
-    createForm.title = "";
-    createForm.description = "";
-    createForm.locationText = "";
+    resetCreateForm();
     await load();
   } catch (error: any) {
     ElMessage.error(toErrorMessage(error, "创建失败"));
