@@ -3,6 +3,8 @@
 当前提供健康检查、知识库入库/检索与 Agent 对话流。
 """
 
+import logging
+
 from fastapi import FastAPI
 
 from adapters.api.middleware import TraceMiddleware
@@ -12,6 +14,12 @@ from adapters.api.routes_health import router as health_router
 from adapters.api.routes_knowledge import router as knowledge_router
 from adapters.api.routes_triage import router as triage_router
 from adapters.api.routes_vector import router as vector_router
+from config import settings
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 def create_app() -> FastAPI:

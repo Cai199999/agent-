@@ -5,11 +5,14 @@ Python 无状态：会话历史、知识片段均由 Java 传入，本层不读�
 """
 
 import json
+import logging
 import time
 from collections.abc import AsyncIterator
 
 from domain.chat import ChatCommand
 from domain.tool import ToolCall
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是「IT 运维工单智能助手」，服务于物业与 IT 运维场景。
 
@@ -42,6 +45,16 @@ class ChatService:
 
     async def stream(self, command: ChatCommand) -> AsyncIterator[tuple[str, dict]]:
         chunks = command.context_chunks[: self.max_context_chunks]
+        context_chars = sum(len(chunk.content or "") for chunk in chunks)
+        logger.info(
+            "chat.context trace=%s session=%s history=%d chunks=%d context_chars=%d max_chunks=%d",
+            command.trace_id,
+            command.session_id,
+            len(command.messages),
+            len(chunks),
+            context_chars,
+            self.max_context_chunks,
+        )
         yield "meta", {
             "trace_id": command.trace_id,
             "session_id": command.session_id,
@@ -124,6 +137,14 @@ class ChatService:
                         if result.success and (result.data or {}).get("state") == "CONFIRM_REQUIRED":
                             status = "CONFIRM_REQUIRED"
 
+                    tool_payload = {}
+                    if result is not None:
+                        tool_payload = result.data if result.success else {
+                            "error_code": result.error_code,
+                            "message": result.message,
+                        }
+                    raw_payload_text = json.dumps(tool_payload or {}, ensure_ascii=False)
+                    result_truncated = len(raw_payload_text) > self.tool_result_max_chars
                     spec = self.tool_registry.get(name)
                     yield "tool_call", {
                         "tool_call_id": call_id,
@@ -134,22 +155,25 @@ class ChatService:
                         "requires_confirm": bool(spec and spec.requires_confirm),
                         "result_summary": message,
                         "result_ticket_id": (result.data or {}).get("ticket_id") if result else None,
+                        "result_size_bytes": len(raw_payload_text.encode("utf-8")),
+                        "result_truncated": result_truncated,
                         "error_code": result.error_code if result else "tool_invalid_arguments",
                     }
 
-                    tool_payload = {}
-                    if result is not None:
-                        tool_payload = result.data if result.success else {
-                            "error_code": result.error_code,
-                            "message": result.message,
-                        }
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": self._tool_payload_content(tool_payload),
+                        "content": self._tool_payload_content(
+                            tool_payload, command.trace_id, name),
                     })
 
             if not completed:
+                logger.warning(
+                    "chat.step_limit trace=%s session=%s max_steps=%d",
+                    command.trace_id,
+                    command.session_id,
+                    self.max_steps,
+                )
                 yield "error", {
                     "code": "ai_agent_step_limit",
                     "message": "工具调用超过最大步骤",
@@ -157,6 +181,13 @@ class ChatService:
                 }
                 return
         except Exception as exc:  # noqa: BLE001 - 统一转为 SSE error 事件
+            logger.warning(
+                "chat.error trace=%s session=%s code=%s reason=%s",
+                command.trace_id,
+                command.session_id,
+                self._map_error(exc),
+                exc,
+            )
             yield "error", {
                 "code": self._map_error(exc),
                 "message": "模型生成失败",
@@ -164,17 +195,36 @@ class ChatService:
             }
             return
 
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "chat.done trace=%s session=%s latency_ms=%d input_tokens=%d output_tokens=%d finish=%s",
+            command.trace_id,
+            command.session_id,
+            latency_ms,
+            token_in,
+            token_out,
+            finish_reason,
+        )
         yield "done", {
             "finish_reason": finish_reason,
             "usage": {"input_tokens": token_in, "output_tokens": token_out},
-            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "latency_ms": latency_ms,
         }
 
-    def _tool_payload_content(self, payload: dict | None) -> str:
+    def _tool_payload_content(self, payload: dict | None,
+                              trace_id: str | None = None,
+                              tool_name: str | None = None) -> str:
         """工具结果确定性硬截断：保持合法 JSON，避免超长结果撑爆上下文。"""
         text = json.dumps(payload or {}, ensure_ascii=False)
         if len(text) <= self.tool_result_max_chars:
             return text
+        logger.warning(
+            "tool_result.truncated trace=%s tool=%s original_chars=%d limit=%d",
+            trace_id,
+            tool_name,
+            len(text),
+            self.tool_result_max_chars,
+        )
         return json.dumps({
             "truncated": True,
             "original_chars": len(text),

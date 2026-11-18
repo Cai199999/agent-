@@ -267,6 +267,11 @@ public class ChatService {
         List<ChatContextChunk> chunks = retrieveContext(content);
         boolean degraded = chunks.isEmpty();
         List<ChatTurn> history = loadHistory(sessionId, userMessage);
+        int contextChars = chunks.stream()
+                .mapToInt(chunk -> chunk.content() == null ? 0 : chunk.content().length())
+                .sum();
+        log.info("chat.context session={} trace={} history={} chunks={} contextChars={} degraded={}",
+                sessionId, traceId, history.size(), chunks.size(), contextChars, degraded);
 
         long assistantId = IdWorker.getId();
         ChatMessageEntity assistant = new ChatMessageEntity();
@@ -375,6 +380,8 @@ public class ChatService {
                             }
                             completeAssistant(assistantId, sessionId, userId, answer.toString(),
                                     tokenIn, tokenOut, latencyMs, citations, traceId);
+                            log.info("chat.done session={} trace={} inputTokens={} outputTokens={} latencyMs={} degraded={}",
+                                    sessionId, traceId, tokenIn, tokenOut, latencyMs, degraded);
                             Map<String, Object> usage = new LinkedHashMap<>();
                             usage.put("inputTokens", tokenIn);
                             usage.put("outputTokens", tokenOut);
@@ -393,6 +400,8 @@ public class ChatService {
                             long latencyMs = System.currentTimeMillis() - startedAt;
                             failAssistant(assistantId, sessionId, userId, answer.toString(),
                                     internalCode, latencyMs, traceId);
+                            log.warn("chat.error session={} trace={} code={} latencyMs={} degraded={}",
+                                    sessionId, traceId, internalCode, latencyMs, degraded);
                             send(emitter, frameId, "error", Map.of(
                                     "code", publicCode.getCode(),
                                     "message", publicCode.getMessage(),
@@ -414,6 +423,8 @@ public class ChatService {
                     long latencyMs = System.currentTimeMillis() - startedAt;
                     failAssistant(assistantId, sessionId, userId, answer.toString(),
                             internalCode, latencyMs, traceId);
+                    log.warn("chat.stream_error session={} trace={} code={} latencyMs={} degraded={}",
+                            sessionId, traceId, internalCode, latencyMs, degraded);
                     send(emitter, frameId, "error", Map.of(
                             "code", publicCode.getCode(),
                             "message", publicCode.getMessage(),
@@ -468,6 +479,10 @@ public class ChatService {
         String resultSummary = asString(data.get("result_summary"));
         String resultTicketId = asString(data.get("result_ticket_id"));
         String errorCode = asString(data.get("error_code"));
+        long resultSizeBytes = asLong(data.get("result_size_bytes"));
+        boolean resultTruncated = Boolean.TRUE.equals(data.get("result_truncated"));
+        log.info("chat.tool session={} trace={} tool={} status={} resultBytes={} truncated={}",
+                sessionId, traceId, name, status, resultSizeBytes, resultTruncated);
         try {
             ChatToolCallEntity entity = toolCallService.recordEvent(
                     sessionId, assistantId, traceId, toolCallId, name, status,
