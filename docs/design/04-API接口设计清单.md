@@ -17,6 +17,7 @@
 |---|---|---|---|
 | v1.0 | 2026-11-17 | Claude | 基于 01/02/03 定稿，输出公共 API、内部 API、SSE、错误码与鉴权设计 |
 | v1.1 | 2026-11-17 | Claude | 安全补全（CSRF、refresh 轮转、方向拆分内部令牌）；SSE 与 02 对齐；错误码全量对照；权限三向表；opaque cursor；附件 Q6 闭环；回填 02 §7.2/§7.3/§6.2 |
+| v1.2 | 2026-11-18 | Claude | Phase 1 实现对账：补 `GET /api/v1/users/options`、`GET /api/v1/health/ai` 与 2 个内部接口；新增 §4.10 实现状态与差异说明；05 状态更新为已确认 |
 
 ### 1.2 关联文档
 
@@ -26,7 +27,7 @@
 | 第二阶段 | `02-技术选型与架构设计.md`（v1.1） | 已回填 |
 | 第三阶段 | `03-数据库设计文档.md`（v1.1） | 已确认 |
 | 第四阶段 | `04-API接口设计清单.md` | 本文档 |
-| 第五阶段 | `05-最终设计方案与开发规范.md` | 待产出 |
+| 第五阶段 | `05-最终设计方案与开发规范.md`（v1.2） | 已确认 |
 
 ### 1.3 本阶段决策
 
@@ -370,6 +371,7 @@
 | POST | `/api/v1/auth/refresh` | 刷新令牌 | Refresh Cookie + CSRF | P0 |
 | POST | `/api/v1/auth/logout` | 登出 | 已登录 | P0 |
 | GET | `/api/v1/auth/me` | 当前用户与权限 | 已登录 | P0 |
+| GET | `/api/v1/users/options` | 派单可选处理人 | `ticket:read` | P0 |
 | PUT | `/api/v1/auth/password` | 修改密码 | 已登录 | P1 |
 | GET | `/api/v1/users` | 用户列表 | `admin:user` | P1 |
 | POST | `/api/v1/users` | 新增用户 | `admin:user` | P1 |
@@ -390,6 +392,9 @@
 | GET | `/api/v1/tickets/{id}` | 工单详情 | `ticket:read` | P0 |
 | GET | `/api/v1/tickets/{id}/similar` | 按工单检索相似历史工单 | `ticket:read` | P0 |
 | POST | `/api/v1/tickets/vector/reindex` | 回填工单历史向量 | `admin:config` | P0 |
+| POST | `/api/v1/tickets/{id}/finish` | 一键结束工单（置 CLOSED） | `ticket:close` | P0 |
+| POST | `/api/v1/tickets/{id}/ai-analysis` | 生成工单 AI 初步分析 | `ticket:read` | P0 |
+| GET | `/api/v1/tickets/{id}/ai-analysis` | 最近一次 AI 分析 | `ticket:read` | P0 |
 | PUT | `/api/v1/tickets/{id}` | 编辑工单 | `ticket:update` | P0 |
 | POST | `/api/v1/tickets/{id}/assign` | 直接派单 | `ticket:assign` | P0 |
 | POST | `/api/v1/tickets/{id}/claim` | 认领 | `ticket:claim` | P0 |
@@ -445,6 +450,7 @@
 | POST | `/api/v1/knowledge/docs` | 上传知识文档 | `knowledge:manage` | P0 |
 | GET | `/api/v1/knowledge/docs` | 文档列表 | `knowledge:read` | P0 |
 | GET | `/api/v1/knowledge/docs/{id}` | 文档详情 | `knowledge:read` | P0 |
+| GET | `/api/v1/knowledge/docs/{id}/download` | 下载知识原始文件（预签名） | `knowledge:read` | P0 |
 | PUT | `/api/v1/knowledge/docs/{id}` | 编辑元数据 | `knowledge:manage` | P0 |
 | DELETE | `/api/v1/knowledge/docs/{id}` | 删除/停用 | `knowledge:manage` | P0 |
 | POST | `/api/v1/knowledge/docs/{id}/reindex` | 重建索引 | `knowledge:manage` | P0 |
@@ -520,7 +526,23 @@
 | 方法 | 路径 | 用途 | 鉴权 |
 |---|---|---|---|
 | GET | `/api/v1/health` | Java 存活 | 公开/内网 |
+| GET | `/api/v1/health/ai` | AI 熔断器状态（`UP`/`DEGRADED`） | 公开/内网 |
 | GET | `/api/v1/ready` | Java 就绪 | 内网 |
+
+### 4.10 Phase 1 实现状态对账（2026-11-18）
+
+> 本节只记录“设计清单 vs 当前代码”的差异，不改变第 4 节契约。P1/P2 仍按原优先级保留。
+
+| 项 | 数量 / 说明 |
+|---|---|
+| 本文档设计接口 | 约 251 条（含 P1/P2 规划） |
+| Java 已实现映射 | 52 个注解（含内部接口与健康检查；一个映射可含多个路径） |
+| Python 已实现路由 | 10 个（对话、分诊、分析、知识、向量、健康） |
+| 本次补录 | `GET /api/v1/users/options`、`GET /api/v1/health/ai`、`GET /internal/v1/tickets/similar`、`POST /internal/v1/knowledge/search` |
+| 设计已列但未实现 | P1/P2 接口（报表、系统管理、业户/设备、通知 SSE、抢单池等），前端暂无入口 |
+| 已知契约偏差 | 当前未实现 refresh/logout/CSRF（access 为本地持久化）；内部接口按实际实现收敛，不改变公共契约 |
+
+**维护规则**：新增/修改 Controller 或 Python 路由时，同一提交内更新本节数量与差异；P0 接口变更必须先改本文档再改代码。
 
 ---
 
@@ -566,6 +588,8 @@
 | POST | `/internal/v1/tickets` | 工具建单 | 5s | 是（`Idempotency-Key`） |
 | GET | `/internal/v1/tickets/{id}` | 查询工单 | 3s | 是 |
 | GET | `/internal/v1/tickets` | 我的/待办工单 | 3s | 是 |
+| GET | `/internal/v1/tickets/similar` | 相似历史工单检索 | 5s | 是 |
+| POST | `/internal/v1/knowledge/search` | 知识检索（Agent 工具） | 5s | 是 |
 | POST | `/internal/v1/tickets/{id}/assign` | 派单（P1） | 3s | 否 |
 | POST | `/internal/v1/chat/sessions/{id}/handoff` | 转人工 | 3s | 是（session+turn） |
 | GET | `/internal/v1/context` | 业务上下文 | 3s | 是 |
@@ -1701,4 +1725,4 @@ Header：`Idempotency-Key: <uuid>`（与建单接口使用同一语义的键）
 
 ---
 
-> **文档结束**。本文档不包含任何业务代码、控制器实现或脚手架；下一阶段将输出《05-最终设计方案与开发规范.md》。
+> **文档结束**。本文档不包含任何业务代码、控制器实现或脚手架；05 已定稿，后续按 §4.10 维护实现状态对账。
