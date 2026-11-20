@@ -4,6 +4,7 @@ Python 无状态：会话历史、知识片段均由 Java 传入，本层不读�
 只读工具经 Java 内部 API 执行；写工具只生成待确认草稿。
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -12,7 +13,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from domain.chat import ChatCommand
-from domain.tool import ToolCall
+from domain.tool import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,16 @@ SYSTEM_PROMPT = """你是「IT 运维工单智能助手」，服务于物业与 
 
 工具使用规则：
 - 用户询问“我的工单/进度/处理到哪了/最近报修”时，调用 ticket_query；需要细节时再调用 ticket_detail。
+- ticket_query 支持 status、priority_code、assignee_id、start_time、end_time、open_only；查询“未解决/未完结”优先用 open_only=true，不要按多个状态重复查询。
+- 用户提到具体人员（如“张三/张工/engineer1”）时，先调用 user_lookup 解析用户 ID，再用 assignee_id 查询；不要猜测 ID。
+- 同一个问题最多查询 2 次；关键词查不到时，先说明未找到并请用户补充工单号/位置/时间，不要用同义关键词反复查询。
 - 用户询问“以前有没有类似问题/历史上怎么处理”时，调用 ticket_similar 检索历史相似工单。
 - 需要引用规范、流程或知识文档时，调用 knowledge_search 检索知识库。
 - 用户明确报修且已提供位置、设备或故障现象时，可调用 ticket_create 生成草稿；草稿必须由用户在界面上确认后才会真正建单。
 - 信息不足时先追问，不要调用 ticket_create。
+- 用户要求派单/接单/解决/验证/关闭/取消/挂起/恢复/结束/评论/材料/回访时，调用对应的 ticket_* 工具；这些工具只生成确认草稿，必须提示用户在界面确认，不得声称已执行。
+- 派单或改派前，先用 user_lookup 把姓名解析为 assignee_id；解析不到就请用户提供账号，不要猜 ID。
+- ticket_resolve 要求工单处于处理中且已有现场照片；ticket_visit_add 仅适用于已关闭工单；条件不满足时如实说明，不要强行调用。
 - 用户要求导出工单/生成报表时，调用 ticket_export；必须把“上周/上个月/最近一周”等表述解析为明确的 ISO 8601 时间范围（Asia/Shanghai，例如 2026-11-10T00:00:00+08:00），不得猜测日期；缺少时间范围时先追问。
 - 用户给出“上周/上个月/最近一周”等相对时间时，直接按当前时间计算并调用 ticket_export，不要反问用户具体日期。
 - ticket_export 只生成待确认导出草稿，不会立即生成文件；不得声称已导出，必须提示用户点击确认。
@@ -40,13 +47,16 @@ SYSTEM_PROMPT = """你是「IT 运维工单智能助手」，服务于物业与 
 class ChatService:
     def __init__(self, llm_client, max_context_chunks: int = 8,
                  tool_registry=None, tool_executor=None, max_steps: int = 3,
-                 tool_result_max_chars: int = 4000):
+                 tool_result_max_chars: int = 4000, plan_events: bool = True,
+                 tool_retry_max: int = 1):
         self.llm_client = llm_client
         self.max_context_chunks = max_context_chunks
         self.tool_registry = tool_registry
         self.tool_executor = tool_executor
         self.max_steps = max(1, max_steps)
         self.tool_result_max_chars = max(256, tool_result_max_chars)
+        self.plan_events = plan_events
+        self.tool_retry_max = max(0, tool_retry_max)
 
     async def stream(self, command: ChatCommand) -> AsyncIterator[tuple[str, dict]]:
         chunks = command.context_chunks[: self.max_context_chunks]
@@ -124,23 +134,92 @@ class ChatService:
                     ],
                 })
 
+                prepared = []
                 for index, call in enumerate(tool_calls):
                     call_id = call.get("id") or f"call_{step}_{index}"
                     name = call.get("name") or ""
                     arguments = self._parse_arguments(call.get("arguments"))
-                    argument_error = arguments is None
-                    if argument_error:
+                    prepared.append((call_id, name, arguments))
+
+                if self.plan_events:
+                    yield "plan", {
+                        "step": step + 1,
+                        "max_steps": self.max_steps,
+                        "actions": [
+                            {
+                                "tool": name,
+                                "arguments_summary": self.tool_executor.summarize(
+                                    name, arguments or {}),
+                            }
+                            for _, name, arguments in prepared
+                        ],
+                    }
+
+                async def run_one(call_id: str, name: str, arguments):
+                    spec = self.tool_registry.get(name)
+                    step_started = time.perf_counter()
+                    attempts = 1
+                    if arguments is None:
                         arguments = {}
                         result = None
                         status = "FAILED"
                         message = "工具参数不是合法 JSON"
                     else:
-                        result = await self.tool_executor.execute(
-                            ToolCall(call_id, name, arguments), actor, command.trace_id)
+                        try:
+                            result, attempts = await self._execute_with_retry(
+                                ToolCall(call_id, name, arguments), actor,
+                                command.trace_id, spec)
+                        except Exception as exc:  # noqa: BLE001
+                            result = ToolResult(call_id, False, error_code="tool_failed",
+                                                message=f"工具执行失败：{exc}")
                         status = "SUCCESS" if result.success else "FAILED"
                         message = result.message or ""
                         if result.success and (result.data or {}).get("state") == "CONFIRM_REQUIRED":
                             status = "CONFIRM_REQUIRED"
+                    return {
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments,
+                        "spec": spec,
+                        "result": result,
+                        "status": status,
+                        "message": message,
+                        "attempts": attempts,
+                        "duration_ms": int((time.perf_counter() - step_started) * 1000),
+                        "error_code": result.error_code if result else "tool_invalid_arguments",
+                    }
+
+                # 同一步骤内全部是幂等工具时并发执行，降低多工具场景的尾延迟；
+                # 只要出现非幂等工具（如 ticket_create）就保持串行，避免副作用乱序。
+                parallel = len(prepared) > 1
+                if parallel:
+                    for _, name, arguments in prepared:
+                        spec = self.tool_registry.get(name)
+                        if arguments is None or spec is None or not spec.idempotent:
+                            parallel = False
+                            break
+                if parallel:
+                    outcomes = await asyncio.gather(*[
+                        run_one(call_id, name, arguments)
+                        for call_id, name, arguments in prepared
+                    ])
+                else:
+                    outcomes = [
+                        await run_one(call_id, name, arguments)
+                        for call_id, name, arguments in prepared
+                    ]
+
+                for index, outcome in enumerate(outcomes):
+                    call_id = outcome["call_id"]
+                    name = outcome["name"]
+                    arguments = outcome["arguments"]
+                    spec = outcome["spec"]
+                    result = outcome["result"]
+                    status = outcome["status"]
+                    message = outcome["message"]
+                    attempts = outcome["attempts"]
+                    duration_ms = outcome["duration_ms"]
+                    error_code = outcome["error_code"]
 
                     tool_payload = {}
                     if result is not None:
@@ -150,7 +229,6 @@ class ChatService:
                         }
                     raw_payload_text = json.dumps(tool_payload or {}, ensure_ascii=False)
                     result_truncated = len(raw_payload_text) > self.tool_result_max_chars
-                    spec = self.tool_registry.get(name)
                     yield "tool_call", {
                         "tool_call_id": call_id,
                         "name": name,
@@ -162,7 +240,16 @@ class ChatService:
                         "result_ticket_id": (result.data or {}).get("ticket_id") if result else None,
                         "result_size_bytes": len(raw_payload_text.encode("utf-8")),
                         "result_truncated": result_truncated,
-                        "error_code": result.error_code if result else "tool_invalid_arguments",
+                        "error_code": error_code,
+                    }
+                    yield "step", {
+                        "step": step + 1,
+                        "action_index": index,
+                        "tool": name,
+                        "status": status,
+                        "attempts": attempts,
+                        "duration_ms": duration_ms,
+                        "error_code": error_code,
                     }
                     if name == "ticket_export" and status == "CONFIRM_REQUIRED":
                         yield "export_card", {
@@ -222,6 +309,29 @@ class ChatService:
             "usage": {"input_tokens": token_in, "output_tokens": token_out},
             "latency_ms": latency_ms,
         }
+
+    async def _execute_with_retry(self, call: ToolCall, actor: dict,
+                                  trace_id: str | None, spec):
+        """只对幂等工具 + 瞬时失败（tool_failed/tool_timeout）做有限重试。"""
+        max_attempts = 1
+        if spec is not None and spec.idempotent:
+            max_attempts += min(max(self.tool_retry_max, 0), max(spec.max_retries, 0))
+        attempts = 0
+        result = None
+        while attempts < max_attempts:
+            attempts += 1
+            result = await self.tool_executor.execute(call, actor, trace_id)
+            if result.success or result.error_code not in {"tool_failed", "tool_timeout"}:
+                return result, attempts
+            if attempts < max_attempts:
+                logger.warning(
+                    "chat.tool_retry trace=%s tool=%s attempt=%d/%d",
+                    trace_id,
+                    call.name,
+                    attempts,
+                    max_attempts,
+                )
+        return result, attempts
 
     def _tool_payload_content(self, payload: dict | None,
                               trace_id: str | None = None,

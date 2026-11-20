@@ -26,6 +26,7 @@ import com.agentgongdan.app.ports.ai.ChatStreamHandler;
 import com.agentgongdan.app.ports.ai.ChatStreamPort;
 import com.agentgongdan.app.ports.ai.TriagePort;
 import com.agentgongdan.app.ports.audit.AuditPort;
+import com.agentgongdan.app.ports.metrics.MetricsPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import com.agentgongdan.domain.audit.AuditEvent;
@@ -89,10 +90,12 @@ public class ChatService {
     private final ChatToolCallService toolCallService;
     private final TaskExecutor chatStreamExecutor;
     private final AuditPort auditPort;
+    private final MetricsPort metrics;
     private final ObjectMapper objectMapper;
     private final int historyLimit;
     private final int contextTopK;
     private final double contextScoreThreshold;
+    private final double contextRelativeScoreRatio;
     private final int contextMaxChars;
     private final long streamTimeoutSeconds;
     private final String defaultModel;
@@ -111,10 +114,12 @@ public class ChatService {
                        ChatToolCallService toolCallService,
                        @Qualifier("chatStreamExecutor") TaskExecutor chatStreamExecutor,
                        AuditPort auditPort,
+                       MetricsPort metrics,
                        ObjectMapper objectMapper,
                        @Value("${CHAT_HISTORY_MAX_MESSAGES:20}") int historyLimit,
                        @Value("${RAG_TOP_K:5}") int contextTopK,
                        @Value("${RAG_SCORE_THRESHOLD:0.35}") double contextScoreThreshold,
+                       @Value("${RAG_RELATIVE_SCORE_RATIO:0.8}") double contextRelativeScoreRatio,
                        @Value("${RAG_MAX_CONTEXT_CHARS:6000}") int contextMaxChars,
                        @Value("${CHAT_STREAM_TIMEOUT_SECONDS:120}") long streamTimeoutSeconds,
                        @Value("${LLM_MODEL:deepseek-chat}") String defaultModel) {
@@ -132,10 +137,12 @@ public class ChatService {
         this.toolCallService = toolCallService;
         this.chatStreamExecutor = chatStreamExecutor;
         this.auditPort = auditPort;
+        this.metrics = metrics;
         this.objectMapper = objectMapper;
         this.historyLimit = historyLimit;
         this.contextTopK = contextTopK;
         this.contextScoreThreshold = contextScoreThreshold;
+        this.contextRelativeScoreRatio = contextRelativeScoreRatio;
         this.contextMaxChars = contextMaxChars;
         this.streamTimeoutSeconds = streamTimeoutSeconds;
         this.defaultModel = defaultModel;
@@ -368,6 +375,9 @@ public class ChatService {
                     }
                     case "ping" -> send(emitter, frameId, "ping",
                             Map.of("ts", asLong(data.get("ts"))), cancelled);
+                    // 有界任务拆解事件：计划与步骤；前端可忽略，不影响旧协议。
+                    case "plan" -> send(emitter, frameId, "plan", data, cancelled);
+                    case "step" -> send(emitter, frameId, "step", data, cancelled);
                     case "tool_call" -> handleToolCall(emitter, frameId, cancelled, data,
                             assistantId, sessionId, userId, traceId);
                     case "export_card" -> {
@@ -390,6 +400,7 @@ public class ChatService {
                                     tokenIn, tokenOut, latencyMs, citations, traceId);
                             log.info("chat.done session={} trace={} inputTokens={} outputTokens={} latencyMs={} degraded={}",
                                     sessionId, traceId, tokenIn, tokenOut, latencyMs, degraded);
+                            metrics.chatCompleted(tokenIn, tokenOut, latencyMs, degraded);
                             Map<String, Object> usage = new LinkedHashMap<>();
                             usage.put("inputTokens", tokenIn);
                             usage.put("outputTokens", tokenOut);
@@ -410,6 +421,7 @@ public class ChatService {
                                     internalCode, latencyMs, traceId);
                             log.warn("chat.error session={} trace={} code={} latencyMs={} degraded={}",
                                     sessionId, traceId, internalCode, latencyMs, degraded);
+                            metrics.chatFailed(internalCode);
                             send(emitter, frameId, "error", Map.of(
                                     "code", publicCode.getCode(),
                                     "message", publicCode.getMessage(),
@@ -433,6 +445,7 @@ public class ChatService {
                             internalCode, latencyMs, traceId);
                     log.warn("chat.stream_error session={} trace={} code={} latencyMs={} degraded={}",
                             sessionId, traceId, internalCode, latencyMs, degraded);
+                    metrics.chatFailed(internalCode);
                     send(emitter, frameId, "error", Map.of(
                             "code", publicCode.getCode(),
                             "message", publicCode.getMessage(),
@@ -491,6 +504,7 @@ public class ChatService {
         boolean resultTruncated = Boolean.TRUE.equals(data.get("result_truncated"));
         log.info("chat.tool session={} trace={} tool={} status={} resultBytes={} truncated={}",
                 sessionId, traceId, name, status, resultSizeBytes, resultTruncated);
+        metrics.toolCall(name, status);
         try {
             ChatToolCallEntity entity = toolCallService.recordEvent(
                     sessionId, assistantId, traceId, toolCallId, name, status,
@@ -715,9 +729,15 @@ public class ChatService {
             List<ChatContextChunk> chunks = new ArrayList<>();
             int rank = 1;
             int budget = contextMaxChars;
+            // 相对阈值：只保留与最高分接近的片段，避免 0.4~0.5 的无关文档被当作引用展示。
+            double topScore = hits.stream()
+                    .mapToDouble(hit -> hit.score() == null ? 0.0 : hit.score())
+                    .max().orElse(0.0);
+            double effectiveThreshold = Math.max(contextScoreThreshold,
+                    topScore * contextRelativeScoreRatio);
             for (KnowledgeHitView hit : hits) {
                 double score = hit.score() == null ? 0.0 : hit.score();
-                if (score < contextScoreThreshold) {
+                if (score < effectiveThreshold) {
                     continue;
                 }
                 String content = hit.content() == null ? "" : hit.content();

@@ -11,7 +11,7 @@ public interface AgentTaskEventStreamPort {
 
     Subscription watch(String taskId,
                        long actorId,
-                       String afterEventId,
+                       Long afterSeq,
                        Consumer<AgentTaskEvent> onEvent,
                        Runnable onHeartbeat,
                        Runnable onComplete,

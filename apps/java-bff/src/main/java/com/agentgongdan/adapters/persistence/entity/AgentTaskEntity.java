@@ -23,6 +23,8 @@ public class AgentTaskEntity {
     private String actorRoles;
     private String clientTaskId;
     private String inputJson;
+    private String contextRefsJson;
+    private String budgetJson;
     private String resultJson;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String errorCode;
@@ -39,6 +41,10 @@ public class AgentTaskEntity {
     private Long costMicros;
     private String executionMode;
     private String delegationId;
+    private String cancelReason;
+    private String parentTaskId;
+    private String correlationId;
+    private LocalDateTime deadlineAt;
     private LocalDateTime confirmedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

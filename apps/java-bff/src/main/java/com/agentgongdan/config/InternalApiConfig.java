@@ -17,6 +17,8 @@ public class InternalApiConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(internalTokenInterceptor)
-                .addPathPatterns("/internal/**", "/agent/**");
+                .addPathPatterns("/internal/**", "/agent/**")
+                // 健康/就绪供编排器探测，不携带内部令牌，也不返回敏感信息。
+                .excludePathPatterns("/agent/v1/health", "/agent/v1/ready");
     }
 }

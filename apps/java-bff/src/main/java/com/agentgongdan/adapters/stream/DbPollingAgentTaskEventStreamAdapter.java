@@ -42,12 +42,12 @@ public class DbPollingAgentTaskEventStreamAdapter implements AgentTaskEventStrea
     }
 
     @Override
-    public Subscription watch(String taskId, long actorId, String afterEventId,
+    public Subscription watch(String taskId, long actorId, Long afterSeq,
                               Consumer<AgentTaskEvent> onEvent,
                               Runnable onHeartbeat,
                               Runnable onComplete,
                               Consumer<Exception> onError) {
-        AtomicReference<String> cursor = new AtomicReference<>(afterEventId);
+        AtomicReference<Long> cursor = new AtomicReference<>(afterSeq);
         AtomicBoolean closed = new AtomicBoolean(false);
         AtomicLong lastHeartbeat = new AtomicLong(System.currentTimeMillis());
         AtomicReference<ScheduledFuture<?>> futureRef = new AtomicReference<>();
@@ -62,7 +62,7 @@ public class DbPollingAgentTaskEventStreamAdapter implements AgentTaskEventStrea
                         taskId, actorId, cursor.get());
                 for (AgentTaskEvent event : events) {
                     onEvent.accept(event);
-                    cursor.set(event.id());
+                    cursor.set(event.seq());
                     if (AgentTaskEventService.isTerminal(event.status())) {
                         finish(futureRef, closed, onComplete);
                         return;

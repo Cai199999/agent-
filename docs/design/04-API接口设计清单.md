@@ -573,6 +573,7 @@
 | POST | `/agent/v1/tasks/{taskId}/cancel` | 取消任务 | 同 Actor |
 | POST | `/agent/v1/tickets/{ticketId}/attachments?type=ONSITE\|USER\|GENERAL` | 子 Agent 上传附件/现场照片 | 内部令牌；ONSITE 需处理人；委托需 scope |
 | POST | `/agent/v1/delegation/token` | 签发短时委托令牌 | 内部令牌；令牌不能再次委托 |
+| GET | `/agent/v1/metrics/summary` | 任务/对话/工具调用聚合指标 | 内部令牌 + ADMIN |
 
 P4 已实现：`SYNC/ASYNC` 任务、`PENDING→RUNNING→SUCCEEDED/FAILED`、进程内队列端口、SSE 事件流、HMAC 委托令牌与 scope、独立 `agent` Profile（只暴露 `/agent/**`）。仍未做：持久化 MQ、进程崩溃任务恢复、真实 token/成本、完整 A2A 注册中心、物理拆服务。
 

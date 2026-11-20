@@ -20,6 +20,13 @@ public record ApiResponse<T>(int code, String message, T data, String traceId) {
         return new ApiResponse<>(errorCode.getCode(), message, null, currentTraceId());
     }
 
+    /**
+     * 带数据体的错误响应；用于健康检查等需要同时返回状态明细的场景。
+     */
+    public static <T> ApiResponse<T> error(ErrorCode errorCode, String message, T data) {
+        return new ApiResponse<>(errorCode.getCode(), message, data, currentTraceId());
+    }
+
     private static String currentTraceId() {
         String traceId = MDC.get("traceId");
         return traceId == null ? "" : traceId;

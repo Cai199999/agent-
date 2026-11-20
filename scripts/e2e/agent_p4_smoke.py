@@ -46,7 +46,7 @@ def main() -> int:
     suffix = str(int(time.time()))
     with httpx.Client(timeout=30.0) as client:
         manifest = client.get(f"{BASE}/agent/v1/manifest", headers=internal).json()["data"]
-        check("manifest 0.5.0", manifest.get("version") == "0.5.0", str(manifest.get("version")))
+        check("manifest 0.8.0", manifest.get("version") == "0.8.0", str(manifest.get("version")))
         check("manifest async modes", "ASYNC" in manifest.get("executionModes", []))
         card = client.get(f"{BASE}/.well-known/agent-card.json").json()
         check("agent card streaming", card.get("capabilities", {}).get("streaming") is True)

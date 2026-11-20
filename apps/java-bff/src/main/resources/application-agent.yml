@@ -1,9 +1,12 @@
 # 独立 Agent 服务实例：复用同一构建产物，只暴露 /agent/** 与发现/健康端点。
 # 启动：JAVA_OPTS 之外追加 --spring.profiles.active=agent
 server:
-  port: ${AGENT_SERVICE_PORT:8400}
+  # 必填：不再提供默认端口；缺失时启动前守卫会明确报错。
+  port: ${AGENT_SERVICE_PORT}
 
 agent:
+  card:
+    base-url: ${AGENT_CARD_URL:http://127.0.0.1:${AGENT_SERVICE_PORT}/agent/v1}
   deployment:
     standalone: true
   task:
@@ -15,3 +18,8 @@ agent:
       poll-interval-ms: ${AGENT_TASK_STREAM_POLL_MS:1000}
       heartbeat-interval-ms: ${AGENT_TASK_STREAM_HEARTBEAT_MS:15000}
       timeout-ms: ${AGENT_TASK_STREAM_TIMEOUT_MS:600000}
+    confirmation:
+      # 清理长期停留在 WAITING_CONFIRM 的过期确认令牌。
+      sweep-enabled: ${AGENT_TASK_CONFIRM_SWEEP_ENABLED:true}
+      sweep-interval-ms: ${AGENT_TASK_CONFIRM_SWEEP_MS:60000}
+      sweep-batch-size: ${AGENT_TASK_CONFIRM_SWEEP_BATCH:100}

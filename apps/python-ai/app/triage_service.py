@@ -84,8 +84,10 @@ class TriageService:
         normalized_draft = None
         if action == "CREATE_DRAFT":
             normalized_draft = self._normalize_draft(draft)
-            if not normalized_draft["title"]:
+            if not normalized_draft["title"] or not normalized_draft["location_text"]:
+                # 位置是派单的必需信息；缺失时先澄清，避免生成无法派单的草稿。
                 action = "CLARIFY"
+                normalized_draft = None
 
         return {
             "intent_code": intent,

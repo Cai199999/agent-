@@ -26,8 +26,11 @@ class Settings(BaseSettings):
     java_base_url: str = "http://127.0.0.1:8200"
     internal_token_p2j_current: str = ""
     internal_token_p2j_next: str = ""
-    agent_max_steps: int = 3
+    agent_max_steps: int = 5
+    agent_plan_events: bool = True
+    agent_tool_retry_max: int = 1
     tool_result_max_chars: int = 4000
+    tool_http_timeout_seconds: float = 10.0
 
     milvus_local_path: str = "./data/milvus/milvus.db"
     milvus_collection_knowledge: str = "agent_gongdan_kb_bge_m3_1024_v1"

@@ -36,6 +36,8 @@ def get_service() -> ChatService:
             executor,
             settings.agent_max_steps,
             settings.tool_result_max_chars,
+            settings.agent_plan_events,
+            settings.agent_tool_retry_max,
         )
     return _service
 

@@ -45,6 +45,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -208,22 +209,49 @@ public class TicketService {
     }
 
     /**
-     * 内部 API：按 actor 的 dataScope 过滤；非特权角色仅能看到本人报障的工单。
+     * 内部 API：非特权角色可看到本人报障或本人处理的工单，与 TicketAccessService 口径一致。
+     * 关键词匹配标题/工单号；支持优先级、处理人、时间范围与“未完结”筛选。
      */
     public List<TicketSummary> listInternal(long actorId, List<String> roles, String status,
                                             String keyword, int limit) {
+        return listInternal(actorId, roles, status, keyword, null, null,
+                null, null, false, limit);
+    }
+
+    public List<TicketSummary> listInternal(long actorId, List<String> roles, String status,
+                                            String keyword, String priorityCode,
+                                            Long assigneeId, LocalDateTime startTime,
+                                            LocalDateTime endTime, boolean openOnly, int limit) {
         int size = Math.min(Math.max(limit, 1), 20);
         var query = Wrappers.<TicketEntity>lambdaQuery()
                 .eq(TicketEntity::getTenantId, 0L)
                 .isNull(TicketEntity::getDeletedAt);
         if (!isPrivileged(roles)) {
-            query.eq(TicketEntity::getReporterId, actorId);
+            query.and(wrapper -> wrapper.eq(TicketEntity::getReporterId, actorId)
+                    .or().eq(TicketEntity::getAssigneeId, actorId));
         }
         if (StringUtils.hasText(status)) {
-            query.eq(TicketEntity::getStatusCode, status);
+            query.eq(TicketEntity::getStatusCode, status.trim().toUpperCase(Locale.ROOT));
+        }
+        if (openOnly) {
+            query.notIn(TicketEntity::getStatusCode, TERMINAL);
+        }
+        if (StringUtils.hasText(priorityCode)) {
+            query.eq(TicketEntity::getPriorityCode, priorityCode.trim().toUpperCase(Locale.ROOT));
+        }
+        if (assigneeId != null) {
+            query.eq(TicketEntity::getAssigneeId, assigneeId);
+        }
+        if (startTime != null) {
+            query.ge(TicketEntity::getCreatedAt, startTime);
+        }
+        if (endTime != null) {
+            query.le(TicketEntity::getCreatedAt, endTime);
         }
         if (StringUtils.hasText(keyword)) {
-            query.like(TicketEntity::getTitle, keyword);
+            String like = keyword.trim();
+            query.and(wrapper -> wrapper.like(TicketEntity::getTitle, like)
+                    .or().like(TicketEntity::getTicketNo, like));
         }
         query.orderByDesc(TicketEntity::getCreatedAt).last("LIMIT " + size);
         return ticketMapper.selectList(query).stream().map(this::toSummary).toList();
@@ -231,10 +259,32 @@ public class TicketService {
 
     public TicketDetail detailInternal(long ticketId, long actorId, List<String> roles) {
         TicketEntity ticket = requireTicket(ticketId);
-        if (!isPrivileged(roles) && !Objects.equals(ticket.getReporterId(), actorId)) {
+        if (!canRead(ticket, actorId, roles)) {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权查看该工单");
         }
-        return detail(ticketId);
+        return detail(ticket);
+    }
+
+    /**
+     * 把工单号或数字 ID 统一解析为数字 ID，供聊天写工具确认时使用。
+     */
+    public long resolveTicketId(String ref) {
+        if (!StringUtils.hasText(ref)) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "工单标识不能为空");
+        }
+        Long id = parseLongOrNull(ref.trim());
+        if (id != null) {
+            return id;
+        }
+        TicketEntity ticket = ticketMapper.selectOne(Wrappers.<TicketEntity>lambdaQuery()
+                .eq(TicketEntity::getTenantId, 0L)
+                .eq(TicketEntity::getTicketNo, ref.trim())
+                .isNull(TicketEntity::getDeletedAt)
+                .last("LIMIT 1"));
+        if (ticket == null) {
+            throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
+        }
+        return ticket.getId();
     }
 
     /**
@@ -258,10 +308,16 @@ public class TicketService {
         if (ticket == null || ticket.getDeletedAt() != null) {
             throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
         }
-        if (!isPrivileged(roles) && !Objects.equals(ticket.getReporterId(), actorId)) {
+        if (!canRead(ticket, actorId, roles)) {
             throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "无权查看该工单");
         }
-        return detail(ticket.getId());
+        return detail(ticket);
+    }
+
+    private boolean canRead(TicketEntity ticket, long actorId, List<String> roles) {
+        return isPrivileged(roles)
+                || Objects.equals(ticket.getReporterId(), actorId)
+                || Objects.equals(ticket.getAssigneeId(), actorId);
     }
 
     private boolean isPrivileged(List<String> roles) {
@@ -314,7 +370,11 @@ public class TicketService {
     }
 
     public TicketDetail detail(long ticketId) {
-        TicketEntity ticket = requireTicket(ticketId);
+        return detail(requireTicket(ticketId));
+    }
+
+    private TicketDetail detail(TicketEntity ticket) {
+        long ticketId = ticket.getId();
         List<TicketEventView> events = eventMapper.selectList(Wrappers.<TicketEventEntity>lambdaQuery()
                         .eq(TicketEventEntity::getTicketId, ticketId)
                         .orderByAsc(TicketEventEntity::getId))

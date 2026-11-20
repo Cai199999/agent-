@@ -53,6 +53,9 @@ public class AgentTaskDispatcher {
         return switch (capability) {
             case "ticket.query" -> ticketService.listInternal(
                     actorId, roles, str(args.get("status")), str(args.get("keyword")),
+                    str(args.get("priorityCode")), longValue(args.get("assigneeId")),
+                    parseTime(args.get("startTime")), parseTime(args.get("endTime")),
+                    Boolean.TRUE.equals(boolValue(args.get("openOnly"))),
                     intValue(args.get("limit"), 5, 1, 20));
             case "ticket.detail" -> {
                 String ref = firstText(str(args.get("ticketId")), str(args.get("ticketNo")));

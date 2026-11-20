@@ -137,9 +137,14 @@ public class ChatController {
             @Valid @RequestBody(required = false) ConfirmToolCallRequest request) {
         StpUtil.checkLogin();
         StpUtil.checkPermission("chat:use");
-        StpUtil.checkPermission("ticket:create");
+        long userId = StpUtil.getLoginIdAsLong();
+        String requiredPermission = toolCallService.requiredPermission(id, userId);
+        if (requiredPermission != null) {
+            StpUtil.checkPermission(requiredPermission);
+        }
         ConfirmToolCallRequest overrides = request != null ? request
                 : new ConfirmToolCallRequest(null, null, null, null, null);
-        return ApiResponse.ok(toolCallService.confirm(id, overrides, StpUtil.getLoginIdAsLong()));
+        return ApiResponse.ok(toolCallService.confirm(
+                id, overrides, userId, StpUtil.getRoleList()));
     }
 }

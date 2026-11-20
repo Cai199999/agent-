@@ -182,6 +182,39 @@
                       <span>{{ tool.errorCode || tool.resultSummary }}</span>
                     </div>
                   </template>
+                  <template v-else-if="isWriteTool(tool.name)">
+                    <div v-if="tool.status === 'PENDING'" class="ticket-card write-card">
+                      <div class="card-head">
+                        <el-tag size="small" type="warning">工单操作确认</el-tag>
+                        <strong>{{ tool.resultSummary || tool.argumentsSummary || WRITE_TOOL_LABELS[tool.name] }}</strong>
+                      </div>
+                      <div class="card-meta">
+                        <span>操作：{{ WRITE_TOOL_LABELS[tool.name] }}</span>
+                        <span v-if="tool.arguments?.ticket_id">工单：{{ tool.arguments.ticket_id }}</span>
+                      </div>
+                      <div v-if="tool.argumentsSummary" class="card-desc">{{ tool.argumentsSummary }}</div>
+                      <div class="card-actions">
+                        <el-button size="small" @click="tool.hidden = true">忽略</el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          :loading="confirmingToolId === tool.id"
+                          @click="confirmWriteTool(tool)"
+                        >
+                          确认执行
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else-if="tool.status === 'SUCCESS'" class="tool-line">
+                      <el-tag size="small" type="success">{{ WRITE_TOOL_LABELS[tool.name] }}</el-tag>
+                      <span>{{ tool.resultSummary || tool.argumentsSummary }}</span>
+                      <router-link to="/tickets">查看工单</router-link>
+                    </div>
+                    <div v-else class="tool-line tool-failed">
+                      <el-tag size="small" type="danger">操作失败</el-tag>
+                      <span>{{ tool.errorCode || tool.resultSummary }}</span>
+                    </div>
+                  </template>
                   <div v-else class="tool-line">
                     <el-tag size="small" :type="tool.status === 'SUCCESS' ? 'success' : 'danger'">
                       {{ tool.name }}
@@ -336,6 +369,39 @@
                     </div>
                     <div v-else class="tool-line tool-failed">
                       <el-tag size="small" type="danger">导出失败</el-tag>
+                      <span>{{ tool.errorCode || tool.resultSummary }}</span>
+                    </div>
+                  </template>
+                  <template v-else-if="isWriteTool(tool.name)">
+                    <div v-if="tool.status === 'PENDING'" class="ticket-card write-card">
+                      <div class="card-head">
+                        <el-tag size="small" type="warning">工单操作确认</el-tag>
+                        <strong>{{ tool.resultSummary || tool.argumentsSummary || WRITE_TOOL_LABELS[tool.name] }}</strong>
+                      </div>
+                      <div class="card-meta">
+                        <span>操作：{{ WRITE_TOOL_LABELS[tool.name] }}</span>
+                        <span v-if="tool.arguments?.ticket_id">工单：{{ tool.arguments.ticket_id }}</span>
+                      </div>
+                      <div v-if="tool.argumentsSummary" class="card-desc">{{ tool.argumentsSummary }}</div>
+                      <div class="card-actions">
+                        <el-button size="small" @click="tool.hidden = true">忽略</el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          :loading="confirmingToolId === tool.id"
+                          @click="confirmWriteTool(tool)"
+                        >
+                          确认执行
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else-if="tool.status === 'SUCCESS'" class="tool-line">
+                      <el-tag size="small" type="success">{{ WRITE_TOOL_LABELS[tool.name] }}</el-tag>
+                      <span>{{ tool.resultSummary || tool.argumentsSummary }}</span>
+                      <router-link to="/tickets">查看工单</router-link>
+                    </div>
+                    <div v-else class="tool-line tool-failed">
+                      <el-tag size="small" type="danger">操作失败</el-tag>
                       <span>{{ tool.errorCode || tool.resultSummary }}</span>
                     </div>
                   </template>
@@ -549,8 +615,43 @@ function useQuickCard(card: { prompt: string }): void {
   input.value = card.prompt;
 }
 
+const WRITE_TOOL_LABELS: Record<string, string> = {
+  ticket_assign: "已派单",
+  ticket_accept: "已接单",
+  ticket_resolve: "已提交解决",
+  ticket_verify: "已验证",
+  ticket_close: "已关闭",
+  ticket_cancel: "已取消",
+  ticket_hold: "已挂起",
+  ticket_resume: "已恢复",
+  ticket_finish: "已结束",
+  ticket_comment_add: "已添加评论",
+  ticket_material_add: "已登记材料",
+  ticket_visit_add: "已登记回访",
+};
+
+function isWriteTool(name?: string | null): boolean {
+  return Boolean(name && name in WRITE_TOOL_LABELS);
+}
+
 function hasCreateToolCall(tools?: ChatToolCall[] | null): boolean {
   return Boolean(tools?.some((tool) => tool.name === "ticket_create"));
+}
+
+async function confirmWriteTool(call: ChatToolCall): Promise<void> {
+  if (call.status !== "PENDING" || confirmingToolId.value) return;
+  confirmingToolId.value = call.id;
+  try {
+    const ticket = await confirmToolCall(call.id);
+    call.status = "SUCCESS";
+    call.resultSummary = WRITE_TOOL_LABELS[call.name] || "工单操作已完成";
+    call.resultTicketId = ticket.id;
+    ElMessage.success(call.resultSummary);
+  } catch (error: any) {
+    ElMessage.error(toErrorMessage(error, "确认操作失败"));
+  } finally {
+    confirmingToolId.value = "";
+  }
 }
 
 function toolDraft(call: ChatToolCall): TicketDraft {

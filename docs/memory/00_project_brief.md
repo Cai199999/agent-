@@ -26,7 +26,13 @@
 ## 终极目标
 
 - 以 `docs/design/06-终极目标与能力评估.md` 为长期能力基线：真实业务任务、完整后端工程、Agent 规划、上下文与记忆、评估与可观测、人机协同。
-- 阶段目标：按 `docs/design/07-子Agent服务化改造方案与阶段目标.md`，将当前平台封装为未来大项目的 Property Maintenance Agent；P0–P4 已实现（Manifest 0.5.0、只读/写 Task API、工单生命周期写能力、确认令牌、`agent_task` 持久化、取消、任务事件、附件上传、Agent Card、SYNC/ASYNC、SSE 事件流、HMAC 委托令牌、独立 agent Profile），不重写现有业务；持久化 MQ、进程崩溃任务恢复、真实 token/成本、完整 A2A 注册与物理拆服务仍待后续。
+- 阶段目标：按 `docs/design/07-子Agent服务化改造方案与阶段目标.md`，将当前平台封装为未来大项目的 Property Maintenance Agent；P0–P4 已实现（Manifest 0.5.0、只读/写 Task API、工单生命周期写能力、确认令牌、`agent_task` 持久化、取消、任务事件、附件上传、Agent Card、SYNC/ASYNC、SSE 事件流、HMAC 委托令牌、独立 agent Profile），不重写现有业务。
+- Stage 5 已完成（2026-11-19）：Java 契约单元测试、运行时契约测试（含双跑与独立实例），P1–P4 冒烟、API E2E、浏览器 E2E 全绿；契约集合已冻结。
+- P6 增量升级已完成（2026-11-19）：Manifest/Agent Card 0.6.0；对话侧 `plan`/`step` 有界拆解事件与幂等工具重试；Micrometer 指标 + `/agent/v1/metrics/summary`；Task 新增并持久化 `parentTaskId`/`correlationId`/`contextRefs`/`budget`/`deadlineAt`；`DownstreamAgentPort` 预留默认禁用。
+- P6.1 轻量生产适配已完成（2026-11-19）：Manifest/Agent Card 0.7.0；Card 地址 `AGENT_CARD_URL` 可配置；deadline 提交与执行前检查（过期 20005）；input 上限 65536 字节；启动恢复重投 PENDING、超时 RUNNING 标记失败；新增 `scripts/ci/verify-agent.sh` 门禁脚本。持久化 MQ、执行中超时中断、真实 token/成本回填、真实跨 Agent 调用与物理拆服务仍待后续。
+- 工具执行打磨已完成（2026-11-19）：同一步骤内幂等工具并发（非幂等串行）；单工具超时按 ToolSpec 生效；Java 错误分级避免无效重试；`ticket_query` 非特权范围改为本人报障或本人处理，并支持标题/工单号关键词；`ticket_detail` 去掉重复查询。合成基准两工具 202ms → 101ms。
+- 聊天写工具已完成（2026-11-19）：新增派单/接单/解决/验证/关闭/取消/挂起/恢复/结束/评论/材料/回访 12 个工具，全部二次确认；确认接口按工具映射权限并复用票级访问控制；支持工单号/数字 ID；派单前用 `user_lookup` 解析用户 ID；`AGENT_MAX_STEPS` 默认 3→5。冒烟与评测报告见 `docs/reports/2026-11-19-Agent对话与工具评测报告.md`。
+- 主 Agent 接入 P0 整改已完成（2026-11-20）：Manifest/Agent Card 0.8.0；`AGENT_SERVICE_PORT` 必填并 fail-fast（本项目 8402，8400 曾被其他项目占用）；能力增加 `capabilityId`/`readOnly`/`requiresConfirmation`/`executionModes`/`scopes`/`inputSchema`/`outputSchema`；新增 `/agent/v1/health`、`/agent/v1/ready`；确认支持 `APPROVE/REJECT` 与过期 sweeper；新增 `GET /tasks?clientTaskId=`；响应增加 `usage`/`progress`/`currentStep`/`cancelReason`；事件增加 `seq`/`type`，支持 `afterSeq` 与 SSE `Last-Event-ID`。评估与实施记录见 `docs/design/11-主Agent接入P0整改评估.md`。
 - 当前为 v1 可演示/可试用版本，综合评估约 5/10，后续迭代必须对齐六项能力并有量化证据。
 
 ## 关键约束

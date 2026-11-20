@@ -48,6 +48,33 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+agent:
+  card:
+    # 对外可达地址；部署时必须改成实际域名/端口，否则调用方按 Card 寻址会失败。
+    base-url: ${AGENT_CARD_URL:http://127.0.0.1:8200/agent/v1}
+  downstream:
+    # 预留：为 false 时只冻结端口契约，不发生任何跨 Agent 调用。
+    enabled: ${AGENT_DOWNSTREAM_ENABLED:false}
+  metrics:
+    max-range-days: ${AGENT_METRICS_MAX_RANGE_DAYS:90}
+    latency-sample-limit: ${AGENT_METRICS_LATENCY_SAMPLE_LIMIT:10000}
+  task:
+    deadline:
+      # 提交时拒绝已过期 deadline；执行前再次检查，已过期任务不落业务数据。
+      enabled: ${AGENT_TASK_DEADLINE_ENABLED:true}
+    limits:
+      max-input-bytes: ${AGENT_TASK_MAX_INPUT_BYTES:65536}
+    recovery:
+      # 启动时重投 PENDING，并把超时 RUNNING 标记 FAILED。
+      enabled: ${AGENT_TASK_RECOVERY_ENABLED:true}
+      stale-seconds: ${AGENT_TASK_RECOVERY_STALE_SECONDS:300}
+      batch-size: ${AGENT_TASK_RECOVERY_BATCH_SIZE:100}
+    confirmation:
+      # 清理长期停留在 WAITING_CONFIRM 的过期确认令牌。
+      sweep-enabled: ${AGENT_TASK_CONFIRM_SWEEP_ENABLED:true}
+      sweep-interval-ms: ${AGENT_TASK_CONFIRM_SWEEP_MS:60000}
+      sweep-batch-size: ${AGENT_TASK_CONFIRM_SWEEP_BATCH:100}
+
 management:
   endpoints:
     web:

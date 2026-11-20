@@ -9,6 +9,10 @@ public record AgentTaskRequest(
         Map<String, Object> input,
         Map<String, Object> contextRefs,
         String clientTaskId,
-        String executionMode
+        String executionMode,
+        String parentTaskId,
+        String correlationId,
+        String deadlineAt,
+        Map<String, Object> budget
 ) {
 }

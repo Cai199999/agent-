@@ -3,6 +3,7 @@ package com.agentgongdan.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
@@ -12,6 +13,7 @@ import java.util.concurrent.ThreadPoolExecutor;
  * 子 Agent 异步执行与事件订阅线程池。
  * 所有池大小/队列均可配置，替换为 MQ 时只需替换 AgentTaskQueuePort 适配器。
  */
+@EnableScheduling
 @Configuration
 public class AgentTaskConfig {
 

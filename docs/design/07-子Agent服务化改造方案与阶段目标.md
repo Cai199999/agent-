@@ -291,6 +291,8 @@ Task 请求只允许：
 - 当前 Java BFF 仍为业务内核；
 - 拆分前提：调用量、故障隔离或团队边界明确。
 
+> P5 状态（2026-11-19）：契约测试已落地（Java 单元 25 项 + 运行时 78 项，含双跑与独立实例）；**物理拆服务仍未做**，当前独立实例只是同一构建产物的 `agent` Profile。
+
 ---
 
 ## 5. 不影响现有功能的保证
@@ -538,6 +540,162 @@ cd apps/web && npm run e2e
 - 委托令牌是内部信任模型下的 HMAC 短令牌，不是 OAuth2/OIDC 委托链；
 - 独立实例仍复用同一 jar 和数据库，未完成物理拆库/拆服务；
 - 未实现完整 A2A 注册中心、任务推送回调与跨实例事件总线。
+
+### 9.9 Stage 5 实现记录（2026-11-19）
+
+目标：冻结契约并用测试固化，保证未来 Orchestrator 接入稳定，同时验证“双跑”和独立实例不破坏现有功能。
+
+已完成：
+
+- **Java 契约单元测试（25 项，无中间件依赖）**：
+  - `AgentTaskServiceTest`（16 项）：Manifest/Agent Card 契约、能力集合与写确认标记、SYNC/ASYNC、`clientTaskId` 幂等、非法 executionMode、委托 scope、Actor 隔离、确认令牌错误/过期/单次使用、异步确认入队、取消语义；
+  - `HmacDelegationTokenAdapterTest`（6 项）：签发/校验、防篡改、过期、issuer/Actor 校验、TTL 钳制到 [60, 3600]、密钥过短未启用；
+  - `InternalTokenInterceptorTest`（3 项）：内部令牌必需、Actor 头解析、委托令牌覆盖可伪造 Actor 头。
+- **运行时契约测试** `scripts/e2e/agent_contract_test.py`（78 项，含可选独立实例）：
+  - Manifest / Agent Card 字段与版本一致性、18 个能力集合冻结、写能力 `requiresConfirm=true`；
+  - 鉴权：缺失/错误内部令牌、非法委托令牌、委托 Actor 绑定、scope 拒绝、禁止二次委托；
+  - Task API：响应字段集合、traceId 透传、`clientTaskId` 按 Actor 幂等、未知能力 `FAILED/60001`、非法模式与空 taskType 400；
+  - 确认令牌：错误令牌、非所有者、单次使用、取消后失效、未确认不落库；
+  - 事件与 SSE：事件字段、状态顺序 `PENDING→RUNNING→SUCCEEDED`、事件 ID 递增、`done` 终止、非所有者 403；
+  - 双跑：`/api/v1` 登录、工单列表、确认建单后的工单详情、AI 健康检查；
+  - 独立实例：manifest/card 可用、用户端 API 返回 404、`/actuator/health` 正常。
+- **回归验证**：
+  - Java `mvn test`：25/25；
+  - 运行时契约：78/78（含独立实例 4 项）；
+  - Agent P1–P4 冒烟：4/4、7/7、7/7、19/19；
+  - 原有 API E2E：22/22；
+  - 浏览器 E2E：5/5。
+- 契约冻结规则：Manifest `version` 与能力集合变更必须同步升级版本并更新本文件与 `agent_contract_test.py`；新增能力默认只读，写能力必须 `requiresConfirm=true`。
+
+**Stage 5 仍保留的边界：**
+
+- 契约测试是运行时黑盒测试，不是 CI 门禁；尚未接入流水线；
+- 独立实例仍复用同一 jar、数据库和进程内队列，未做物理拆服务/拆库；
+- 队列、SSE 轮询、token/成本等 P4 已知边界不变；
+- 未引入 Pact 等消费者驱动契约工具，当前以 Manifest + 字段集合冻结为主。
+
+### 9.10 P6 增量升级（2026-11-19）
+
+目标：在不改变现有功能的前提下，提升任务拆解与可观测性，并预留跨 Agent 传参。
+
+已完成：
+
+- **任务拆解（有界）**：
+  - 对话侧新增 `plan` / `step` SSE 事件，暴露每步工具与耗时；
+  - 幂等只读工具瞬时失败最多重试 1 次，非幂等工具不重试；
+  - `AGENT_PLAN_EVENTS`、`AGENT_TOOL_RETRY_MAX` 可配置。
+- **可观测性**：
+  - 新增 `MetricsPort` + `MicrometerMetricsAdapter`：任务状态/耗时、队列深度、对话 token/耗时、工具调用；
+  - 新增 `GET /agent/v1/metrics/summary`（ADMIN）：成功率、P95、状态/能力分布、token 与工具调用；
+  - 复用既有 `chat_message` token/耗时字段，不新增采集表。
+- **跨 Agent 传参预留**：
+  - Task 新增 `parentTaskId` / `correlationId` / `deadlineAt` / `budget`，`contextRefs` 持久化；
+  - `V19` 增加上下文列与索引，无物理外键；
+  - 新增 `DownstreamAgentPort` 与禁用适配器，默认 `AGENT_DOWNSTREAM_ENABLED=false`；
+  - Manifest / Agent Card 升至 `0.6.0`。
+- **验证**：
+  - Java 契约单元测试 27/27；
+  - Python 拆解/重试测试 3/3；
+  - 运行时契约 93/93（含独立实例）；
+  - 原有 API E2E 25/25；Agent P1–P4 4/7/7/19 全通过；浏览器 E2E 5/5。
+
+**P6 仍保留的边界：**
+
+- `deadlineAt` / `budget` 只记录，不强制中断；
+- 指标聚合实时查库，未接指标库/Prometheus；
+- 下游 Agent 端口仅冻结契约，未发起真实调用；
+- 无通用 Planner、无多 Agent 编排。
+
+### 9.11 P6.1 轻量生产适配（2026-11-19）
+
+目标：做接入前必要的生产适配，不引入新中间件、不拆服务。
+
+已完成：
+
+- Agent Card `url` 改为 `AGENT_CARD_URL` 配置，BFF 默认 8200、agent Profile 默认 8400；
+- `deadlineAt` 轻量生效：提交时拒绝过期；Worker 执行前复查，过期任务 `FAILED` + `20005`，不写业务数据；不中断执行中任务；
+- Manifest 新增 `enforcement`，明确 `budget` 仅记录、`runtimeTimeout` 不强制；
+- `input` 默认上限 65536 字节（`AGENT_TASK_MAX_INPUT_BYTES`），超限 400/60001；
+- 新增启动恢复 `AgentTaskRecoveryRunner`：重投 `PENDING`，超时 `RUNNING` 标记 `FAILED`（50004），不自动重放写操作；
+- 新增 `scripts/ci/verify-agent.sh` 轻量门禁脚本；
+- Manifest / Agent Card 升至 `0.7.0`。
+
+验证：
+
+- Java 34/34（新增 deadline、输入上限、启动恢复测试）；
+- Python 3/3；
+- 原有 API E2E、Agent P1–P4、浏览器 E2E 回归口径不变。
+
+仍保留的边界：
+
+- 队列仍为进程内线程池；恢复只保证“不永久悬挂”，不保证任务不中断；
+- `deadlineAt` 不中断执行中任务，`budget` 不强制；
+- 指标聚合实时查库，无看板/告警；成本未回填；下游 Agent 未真实调用。
+
+### 9.12 工具执行打磨（2026-11-19）
+
+目标：从“平台治理”转向“工具本身”，先解决影响成功率与延迟的问题。
+
+已完成：
+
+- 同一 LLM 步骤内，全部为幂等工具时并发执行；含非幂等工具则串行，事件顺序保持不变；
+- 单工具超时按 `ToolSpec.timeout_seconds` 生效，HTTP 客户端 10s 仅兜底；
+- Java 内部错误分级为 `tool_forbidden` / `tool_not_found` / `tool_invalid_arguments` / `tool_failed`，仅瞬时错误与超时重试；
+- `ticket_query` 非特权范围改为“本人报障或本人处理”，关键词同时匹配标题与工单号；
+- `ticket_detail` 复用已加载实体，去掉重复查询。
+
+验证：
+
+- Python 14/14（新增并发、超时、错误分级、参数校验测试）；
+- Java 34/34；API E2E 25/25；
+- 合成基准：两个各 100ms 的工具，串行 202ms → 并发 101ms，降低约 50%。
+
+### 9.13 聊天写工具与确认（2026-11-19）
+
+目标：把 `/agent/v1` 已有的工单写能力接入对话工具，保持人在回路。
+
+已完成：
+
+- 新增 12 个聊天写工具：派单、接单、解决、验证、关闭、取消、挂起、恢复、结束、评论、材料、回访；
+- 全部 `requiresConfirm=true`，只生成待确认草稿；确认后由 Java 执行；
+- 确认接口按工具名映射权限（`ticket:assign` / `ticket:handle` / `ticket:verify` / `ticket:close` / `ticket:read`），并复用票级访问控制；
+- 支持工单号/数字 ID；派单前用 `user_lookup` 解析用户 ID；
+- 确认增加 `PENDING → RUNNING` 领取锁；权限拒绝统一 `403/10003`；
+- `AGENT_MAX_STEPS` 默认 3 → 5。
+
+验证：
+
+- Python 23/23、Java 34/34；
+- `scripts/eval/write_tool_smoke.py`：assign、hold、resume、comment、close、material、visit 全部通过；
+- `scripts/eval/write_tool_permission_smoke.py`：4/4 通过；
+- 评测报告见 `docs/reports/2026-11-19-Agent对话与工具评测报告.md`。
+
+仍保留：导出 `open_only`/处理人筛选、列表批量返回姓名、聚合分析工具、草稿 TTL 与版本快照。
+
+### 9.14 主 Agent 接入 P0 整改（2026-11-20）
+
+目标：让 Manifest 可机器解析、确认可同意/拒绝、断线可重连、重启不丢任务。
+
+已完成：
+
+- **端口**：`AGENT_SERVICE_PORT` 转为必填，删除 8400 默认值；新增启动前端口守卫，缺失或被占用时 fail-fast；本项目登记独立 Agent 端口 `8402`（8400 曾被其他项目占用）；
+- **Manifest 0.8.0**：每项能力新增 `capabilityId`（`property.*`）、`readOnly`、`requiresConfirmation`、`executionModes`、`scopes`、`inputSchema`、`outputSchema`；顶层新增 `features`、`endpoints`、`healthEndpoint`、`readyEndpoint`、`delegationEndpoint`、`envelope`、`asyncDurability`；
+- **健康/就绪**：新增 `GET /agent/v1/health`、`GET /agent/v1/ready`；ready 检查数据库连接，不可用返回 503；独立 Profile 放行根路径 `/health`、`/ready`；
+- **确认**：`confirm` 支持 `decision=APPROVE/REJECT`；拒绝进入新终态 `REJECTED`；新增确认过期 sweeper，将超时 `WAITING_CONFIRM` 条件更新为 `FAILED`；
+- **恢复**：新增 `GET /agent/v1/tasks?clientTaskId=`，按 Actor + 幂等键查询；
+- **响应**：新增 `capabilityId`、`clientTaskId`、`usage`、`progress`、`currentStep`、`cancelReason`；保留旧字段；
+- **事件**：新增任务内 `seq` 与 `type`；`GET /events?afterSeq=`；SSE `id:` 使用 `seq` 并支持 `Last-Event-ID`；
+- **P1 补充**：取消支持 `reason`；新增工单附件列表；`asyncDurability=db-recovery` 如实声明启动重投 PENDING、不重放 RUNNING。
+
+验证：
+
+- Java 单测通过（含新增 sweeper、事件 seq/type、端口守卫测试）；
+- `agent_contract_test.py`：嵌入 BFF 117/117、独立 Agent 8402 121/121；
+- 端口缺失与端口占用均验证 fail-fast。
+
+详见 `11-主Agent接入P0整改评估.md`。
+
+> 9.11 / 9.12 中“默认 8400”的描述已被本节取代；8400 不再作为本项目默认端口。
 
 ---
 

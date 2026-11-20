@@ -3,12 +3,14 @@ package com.agentgongdan.app.service;
 import com.agentgongdan.adapters.persistence.entity.AgentTaskEntity;
 import com.agentgongdan.adapters.persistence.mapper.AgentTaskMapper;
 import com.agentgongdan.app.ports.agent.AgentTaskJobHandler;
+import com.agentgongdan.app.ports.metrics.MetricsPort;
 import com.agentgongdan.common.error.ApiException;
 import com.agentgongdan.common.error.ErrorCode;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -33,15 +35,21 @@ public class AgentTaskWorker implements AgentTaskJobHandler {
     private final AgentTaskEventService eventService;
     private final AgentTaskDispatcher dispatcher;
     private final ObjectMapper objectMapper;
+    private final MetricsPort metrics;
+    private final boolean deadlineEnabled;
 
     public AgentTaskWorker(AgentTaskMapper taskMapper,
                            AgentTaskEventService eventService,
                            AgentTaskDispatcher dispatcher,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           MetricsPort metrics,
+                           @Value("${agent.task.deadline.enabled:true}") boolean deadlineEnabled) {
         this.taskMapper = taskMapper;
         this.eventService = eventService;
         this.dispatcher = dispatcher;
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
+        this.deadlineEnabled = deadlineEnabled;
     }
 
     /**
@@ -81,6 +89,9 @@ public class AgentTaskWorker implements AgentTaskJobHandler {
             return;
         }
         eventService.record(taskId, entity.getStatus(), entity.getErrorMessage());
+        metrics.taskStatus(entity.getCapability(), entity.getStatus());
+        metrics.taskLatency(entity.getCapability(),
+                entity.getLatencyMs() == null ? 0 : entity.getLatencyMs());
     }
 
     /**
@@ -92,6 +103,16 @@ public class AgentTaskWorker implements AgentTaskJobHandler {
 
     private void run(AgentTaskEntity entity, List<String> roles) {
         long started = System.currentTimeMillis();
+        if (deadlineEnabled && entity.getDeadlineAt() != null
+                && !entity.getDeadlineAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))) {
+            // 只在执行前检查，不中断正在执行的任务；避免把“已排队到过期”的任务写进业务库。
+            entity.setStatus("FAILED");
+            entity.setErrorCode(String.valueOf(ErrorCode.AGENT_TASK_DEADLINE_EXCEEDED.getCode()));
+            entity.setErrorMessage(ErrorCode.AGENT_TASK_DEADLINE_EXCEEDED.getMessage());
+            entity.setLatencyMs(0);
+            entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+            return;
+        }
         try {
             Object result = dispatcher.dispatch(entity.getCapability(),
                     fromJson(entity.getInputJson()), entity.getActorId(), roles, entity.getTaskId());

@@ -1,6 +1,7 @@
 package com.agentgongdan.common.error;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
 import com.agentgongdan.common.api.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,8 +9,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -46,6 +49,13 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ErrorCode.AUTH_UNAUTHORIZED));
     }
 
+    @ExceptionHandler(NotPermissionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotPermission(NotPermissionException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error(ErrorCode.AUTH_FORBIDDEN));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
@@ -55,6 +65,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest()
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR, message));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingParameter(
+            MissingServletRequestParameterException ex) {
+        return ResponseEntity.badRequest()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR,
+                        "缺少参数: " + ex.getParameterName()));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.badRequest()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR,
+                        "参数格式错误: " + ex.getName()));
     }
 
     @ExceptionHandler(Exception.class)

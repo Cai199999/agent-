@@ -1,5 +1,6 @@
 package com.agentgongdan.adapters.web.controller;
 
+import com.agentgongdan.adapters.web.dto.AgentCancelRequest;
 import com.agentgongdan.adapters.web.dto.AgentConfirmRequest;
 import com.agentgongdan.adapters.web.dto.AgentTaskEventView;
 import com.agentgongdan.adapters.web.dto.AgentTaskRequest;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -120,6 +122,16 @@ public class AgentTaskController {
     }
 
     /**
+     * 主 Agent 崩溃恢复：按幂等键查回自己的任务，避免重复提交写操作。
+     */
+    @GetMapping("/tasks")
+    public ApiResponse<AgentTaskView> byClientTaskId(
+            @RequestParam("clientTaskId") String clientTaskId,
+            @RequestAttribute("internalActorId") long actorId) {
+        return ApiResponse.ok(agentTaskService.findByClientTaskId(clientTaskId, actorId));
+    }
+
+    /**
      * 供 Agent 上传现场照片/附件；ONSITE 照片用于 ticket.resolve。
      */
     @PostMapping(value = "/tickets/{ticketId}/attachments",
@@ -144,23 +156,48 @@ public class AgentTaskController {
         return ApiResponse.ok(attachmentService.upload(ticketId, file, actorId, type));
     }
 
+    /**
+     * 工单附件列表；附件属于工单维度，不伪造任务级附件表。
+     * 委托令牌需具备 ticket.detail（或 *）scope。
+     */
+    @GetMapping("/tickets/{ticketId}/attachments")
+    public ApiResponse<List<AttachmentView>> listAttachments(
+            @PathVariable long ticketId,
+            @RequestAttribute("internalActorId") long actorId,
+            @RequestAttribute("internalActorRoles") List<String> roles,
+            @RequestAttribute(name = "internalDelegationScopes", required = false)
+            List<String> delegationScopes) {
+        if (delegationScopes != null && !delegationScopes.contains("*")
+                && !delegationScopes.contains("ticket.detail")) {
+            throw new ApiException(ErrorCode.AUTH_FORBIDDEN, "委托令牌 scope 不允许查看附件");
+        }
+        ticketAccessService.requireReadable(ticketId, actorId, roles);
+        return ApiResponse.ok(attachmentService.list(ticketId));
+    }
+
     @GetMapping("/tasks/{taskId}/events")
     public ApiResponse<List<AgentTaskEventView>> events(
             @PathVariable String taskId,
+            @RequestParam(name = "afterSeq", required = false) Long afterSeq,
             @RequestAttribute("internalActorId") long actorId) {
-        return ApiResponse.ok(agentTaskService.events(taskId, actorId));
+        return ApiResponse.ok(agentTaskService.events(taskId, actorId, afterSeq));
     }
 
     /**
      * SSE 任务事件流：先回放历史，再增量推送，终态后发送 done 并关闭。
+     * 断线重连使用 afterSeq 或 Last-Event-ID（值为事件 seq）。
      */
     @GetMapping(value = "/tasks/{taskId}/events/stream",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamEvents(
             @PathVariable String taskId,
             @RequestAttribute("internalActorId") long actorId,
+            @RequestParam(name = "afterSeq", required = false) Long afterSeq,
+            @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
             HttpServletResponse response) {
-        List<AgentTaskEventView> backlog = agentTaskService.events(taskId, actorId);
+        Long cursor = resolveCursor(afterSeq, lastEventId);
+        AgentTaskView task = agentTaskService.get(taskId, actorId);
+        List<AgentTaskEventView> backlog = agentTaskService.events(taskId, actorId, cursor);
         SseEmitter emitter = new SseEmitter(streamTimeoutMs);
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("X-Accel-Buffering", "no");
@@ -177,10 +214,9 @@ public class AgentTaskController {
         emitter.onTimeout(close);
         emitter.onError(error -> close.run());
 
-        String afterEventId = null;
         for (AgentTaskEventView event : backlog) {
             sendEvent(emitter, event);
-            afterEventId = event.id();
+            cursor = event.seq();
             lastStatus.set(event.status());
             if (AgentTaskEventService.isTerminal(event.status())) {
                 sendDone(emitter, taskId, event.status());
@@ -189,8 +225,16 @@ public class AgentTaskController {
             }
         }
 
+        // 游标已越过终态事件时立即结束，避免重连后空等。
+        if (AgentTaskEventService.isTerminal(task.status())) {
+            sendDone(emitter, taskId, task.status());
+            emitter.complete();
+            return emitter;
+        }
+
+        Long subscribeCursor = cursor;
         subscription.set(eventStreamPort.watch(
-                taskId, actorId, afterEventId,
+                taskId, actorId, subscribeCursor,
                 event -> {
                     lastStatus.set(event.status());
                     sendEvent(emitter, event);
@@ -207,8 +251,10 @@ public class AgentTaskController {
     @PostMapping("/tasks/{taskId}/cancel")
     public ApiResponse<AgentTaskView> cancel(
             @PathVariable String taskId,
+            @RequestBody(required = false) AgentCancelRequest request,
             @RequestAttribute("internalActorId") long actorId) {
-        return ApiResponse.ok(agentTaskService.cancel(taskId, actorId));
+        return ApiResponse.ok(agentTaskService.cancel(
+                taskId, request == null ? null : request.reason(), actorId));
     }
 
     @PostMapping("/tasks/{taskId}/confirm")
@@ -218,18 +264,40 @@ public class AgentTaskController {
             @RequestAttribute("internalActorId") long actorId,
             @RequestAttribute("internalActorRoles") List<String> roles) {
         return ApiResponse.ok(agentTaskService.confirm(
-                taskId, request.confirmationToken(), actorId, roles));
+                taskId, request.confirmationToken(), request.decision(), actorId, roles));
+    }
+
+    private Long resolveCursor(Long afterSeq, String lastEventId) {
+        Long headerSeq = parseSeq(lastEventId);
+        if (afterSeq == null) {
+            return headerSeq;
+        }
+        if (headerSeq == null) {
+            return afterSeq;
+        }
+        return Math.max(afterSeq, headerSeq);
+    }
+
+    private Long parseSeq(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private void sendEvent(SseEmitter emitter, AgentTaskEvent event) {
-        sendEvent(emitter, new AgentTaskEventView(event.id(), event.taskId(),
-                event.status(), event.message(), event.createdAt()));
+        sendEvent(emitter, new AgentTaskEventView(event.id(), event.seq(), event.taskId(),
+                event.type(), event.status(), event.message(), event.createdAt()));
     }
 
     private void sendEvent(SseEmitter emitter, AgentTaskEventView event) {
         try {
             emitter.send(SseEmitter.event()
-                    .id(event.id())
+                    .id(String.valueOf(event.seq()))
                     .name("task-event")
                     .data(event));
         } catch (IOException | IllegalStateException e) {

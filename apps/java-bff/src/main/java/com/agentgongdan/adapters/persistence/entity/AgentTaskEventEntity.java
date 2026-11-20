@@ -14,6 +14,8 @@ public class AgentTaskEventEntity {
     private Long id;
     private Long tenantId;
     private String taskId;
+    private Long seq;
+    private String type;
     private String status;
     private String message;
     private LocalDateTime createdAt;

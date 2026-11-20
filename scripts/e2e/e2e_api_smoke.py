@@ -167,6 +167,14 @@ def main() -> int:
         check("对话无 error", not events.get("error"), str(events.get("error", "")))
         check("AI 分诊事件", bool(events.get("triage")), str(events.get("triage", "")))
 
+        tool_events = chat(client, admin, session_id, "帮我查一下我最近的工单进度。")
+        check("有界计划事件", bool(tool_events.get("plan")), str(sorted(tool_events)))
+        check("步骤事件", bool(tool_events.get("step")), str(sorted(tool_events)))
+        if tool_events.get("step"):
+            first_step = tool_events["step"][0]
+            check("步骤状态", first_step.get("status") in {"SUCCESS", "CONFIRM_REQUIRED"},
+                  str(first_step))
+
         ticket_id = None
         cards = events.get("ticket_card") or []
         if cards:

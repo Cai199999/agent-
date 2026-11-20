@@ -27,6 +27,8 @@ public class AgentStandaloneModeFilter extends OncePerRequestFilter {
     private static final List<String> ALLOWED_EXACT = List.of(
             "/.well-known/agent-card.json",
             "/agent-card.json",
+            "/health",
+            "/ready",
             "/error"
     );
 

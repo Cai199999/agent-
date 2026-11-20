@@ -4,14 +4,37 @@
 - 写工具：只生成待确认草稿，由 Java 在用户确认后落库。
 """
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any
+
+import httpx
 
 from adapters.gateways.java_internal_client import JavaInternalClient, JavaInternalError
 from app.tool_registry import ToolRegistryImpl
 from app.triage_service import VALID_PRIORITIES, VALID_TICKET_TYPES
 from domain.tool import ToolCall, ToolResult
+
+VALID_TICKET_STATUSES = (
+    "PENDING", "PENDING_ACCEPT", "PROCESSING", "PENDING_VERIFY",
+    "RESOLVED", "CLOSED", "CANCELLED", "SUSPENDED",
+)
+
+WRITE_TOOLS = {
+    "ticket_assign": ("assignee_id",),
+    "ticket_accept": (),
+    "ticket_resolve": ("service_item_text",),
+    "ticket_verify": ("approved",),
+    "ticket_close": (),
+    "ticket_cancel": ("cancel_reason",),
+    "ticket_hold": ("reason",),
+    "ticket_resume": (),
+    "ticket_finish": (),
+    "ticket_comment_add": ("content",),
+    "ticket_material_add": ("material_name",),
+    "ticket_visit_add": (),
+}
 
 
 class ToolExecutorImpl:
@@ -29,34 +52,80 @@ class ToolExecutorImpl:
         if arguments is None:
             return ToolResult(call.tool_call_id, False, error_code="tool_invalid_arguments",
                               message="工具参数不是合法 JSON")
+        timeout = max(0.1, float(spec.timeout_seconds or 5))
         try:
-            if call.name == "ticket_query":
-                return await self._ticket_query(call.tool_call_id, arguments, actor, trace_id)
-            if call.name == "ticket_export":
-                return self._ticket_export(call.tool_call_id, arguments)
-            if call.name == "ticket_detail":
-                return await self._ticket_detail(call.tool_call_id, arguments, actor, trace_id)
-            if call.name == "ticket_similar":
-                return await self._ticket_similar(call.tool_call_id, arguments, actor, trace_id)
-            if call.name == "knowledge_search":
-                return await self._knowledge_search(call.tool_call_id, arguments, actor, trace_id)
-            if call.name == "ticket_create":
-                return self._ticket_create(call.tool_call_id, arguments)
-            return ToolResult(call.tool_call_id, False, error_code="tool_not_implemented",
-                              message=f"工具 {call.name} 未实现")
+            # 单工具超时以 ToolSpec 为准；HTTP 客户端超时只做兜底。
+            return await asyncio.wait_for(
+                self._dispatch(call, arguments, actor, trace_id), timeout=timeout)
+        except asyncio.TimeoutError:
+            return ToolResult(call.tool_call_id, False, error_code="tool_timeout",
+                              message=f"工具执行超时（{timeout:g}s）")
         except JavaInternalError as exc:
-            return ToolResult(call.tool_call_id, False, error_code="tool_failed",
+            return ToolResult(call.tool_call_id, False, error_code=exc.error_code,
                               message=str(exc))
+        except httpx.TimeoutException:
+            return ToolResult(call.tool_call_id, False, error_code="tool_timeout",
+                              message="内部接口超时")
         except Exception as exc:  # noqa: BLE001
             return ToolResult(call.tool_call_id, False, error_code="tool_failed",
                               message=f"工具执行失败：{exc}")
 
+    async def _dispatch(self, call: ToolCall, arguments: dict, actor: dict,
+                        trace_id: str | None) -> ToolResult:
+        if call.name == "ticket_query":
+            return await self._ticket_query(call.tool_call_id, arguments, actor, trace_id)
+        if call.name == "ticket_export":
+            return self._ticket_export(call.tool_call_id, arguments)
+        if call.name == "user_lookup":
+            return await self._user_lookup(call.tool_call_id, arguments, actor, trace_id)
+        if call.name == "ticket_detail":
+            return await self._ticket_detail(call.tool_call_id, arguments, actor, trace_id)
+        if call.name == "ticket_similar":
+            return await self._ticket_similar(call.tool_call_id, arguments, actor, trace_id)
+        if call.name == "knowledge_search":
+            return await self._knowledge_search(call.tool_call_id, arguments, actor, trace_id)
+        if call.name == "ticket_create":
+            return self._ticket_create(call.tool_call_id, arguments)
+        if call.name in WRITE_TOOLS:
+            return self._write_draft(call.tool_call_id, call.name, arguments)
+        return ToolResult(call.tool_call_id, False, error_code="tool_not_implemented",
+                          message=f"工具 {call.name} 未实现")
+
     async def _ticket_query(self, call_id: str, args: dict, actor: dict,
                             trace_id: str | None) -> ToolResult:
         limit = self._int(args.get("limit"), 5, 1, 10)
-        status = self._text(args.get("status")) or None
-        keyword = self._text(args.get("keyword")) or None
-        data = await self.gateway.list_tickets(actor, status, keyword, limit, trace_id)
+        status = self._text(args.get("status")).upper() or None
+        if status and status not in VALID_TICKET_STATUSES:
+            return ToolResult(
+                call_id, False, error_code="tool_invalid_arguments",
+                message="不支持的状态；可选：" + "/".join(VALID_TICKET_STATUSES),
+            )
+        keyword = self._text(args.get("keyword"))[:100] or None
+        priority = self._text(args.get("priority_code")).upper() or None
+        if priority and priority not in VALID_PRIORITIES:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="不支持的优先级；可选：LOW/NORMAL/HIGH/URGENT")
+        assignee_id = self._text(args.get("assignee_id")) or None
+        if assignee_id and not assignee_id.isdigit():
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="assignee_id 必须是数字用户 ID")
+        try:
+            start_time = self._parse_iso(self._text(args.get("start_time")))
+            end_time = self._parse_iso(self._text(args.get("end_time")))
+        except ValueError:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="时间范围必须是带时区的 ISO 8601")
+        if start_time and end_time and end_time <= start_time:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="end_time 必须晚于 start_time")
+        data = await self.gateway.list_tickets(
+            actor, status, keyword, limit,
+            priority=priority, assignee_id=assignee_id,
+            start_time=start_time.isoformat() if start_time else None,
+            end_time=end_time.isoformat() if end_time else None,
+            open_only=self._bool(args.get("open_only")),
+            trace_id=trace_id,
+        )
         tickets = data.get("items") or []
         compact = [
             {
@@ -65,6 +134,8 @@ class ToolExecutorImpl:
                 "title": item.get("title"),
                 "status_code": item.get("statusCode"),
                 "priority_code": item.get("priorityCode"),
+                "assignee_id": str(item.get("assigneeId")) if item.get("assigneeId") else None,
+                "sla_resolve_due_at": item.get("slaResolveDueAt"),
                 "created_at": item.get("createdAt"),
             }
             for item in tickets
@@ -213,9 +284,31 @@ class ToolExecutorImpl:
             parts.append(f"关键词：{filters['keyword']}")
         return "，".join(parts) + "。确认后生成 Excel。"
 
+    async def _user_lookup(self, call_id: str, args: dict, actor: dict,
+                           trace_id: str | None) -> ToolResult:
+        keyword = self._text(args.get("keyword"))[:50]
+        if not keyword:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="缺少 keyword")
+        limit = self._int(args.get("limit"), 10, 1, 20)
+        data = await self.gateway.lookup_users(actor, keyword, limit, trace_id)
+        users = [
+            {
+                "id": str(item.get("id")),
+                "username": item.get("username"),
+                "display_name": item.get("displayName"),
+            }
+            for item in data.get("items") or []
+        ]
+        return ToolResult(
+            call_id, True,
+            data={"count": len(users), "users": users},
+            message=f"找到 {len(users)} 个用户" if users else "未找到匹配用户",
+        )
+
     async def _ticket_detail(self, call_id: str, args: dict, actor: dict,
                              trace_id: str | None) -> ToolResult:
-        ticket_id = self._text(args.get("ticket_id"))
+        ticket_id = self._text(args.get("ticket_id"))[:64]
         if not ticket_id:
             return ToolResult(call_id, False, error_code="tool_invalid_arguments",
                               message="缺少 ticket_id")
@@ -233,8 +326,12 @@ class ToolExecutorImpl:
                     "ticket_type_code": ticket.get("ticketTypeCode"),
                     "location_text": ticket.get("locationText"),
                     "assignee_id": ticket.get("assigneeId"),
+                    "assignee_name": data.get("assigneeName"),
+                    "reporter_name": data.get("reporterName"),
+                    "sla_resolve_due_at": ticket.get("slaResolveDueAt"),
                     "created_at": ticket.get("createdAt"),
                 },
+                "sla": data.get("sla"),
                 "description": data.get("description"),
                 "recent_events": [
                     {"event_type": event.get("eventType"), "created_at": event.get("createdAt")}
@@ -269,13 +366,83 @@ class ToolExecutorImpl:
             message="工单草稿已生成，等待用户确认",
         )
 
+    @classmethod
+    def _write_draft(cls, call_id: str, name: str, args: dict) -> ToolResult:
+        ticket_id = cls._text(args.get("ticket_id"))[:64]
+        if not ticket_id:
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="缺少 ticket_id")
+        for field in WRITE_TOOLS[name]:
+            value = args.get(field)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                                  message=f"缺少 {field}")
+        if name == "ticket_assign" and not str(args["assignee_id"]).strip().isdigit():
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="assignee_id 必须是数字用户 ID")
+        if name == "ticket_verify" and not isinstance(args["approved"], bool):
+            return ToolResult(call_id, False, error_code="tool_invalid_arguments",
+                              message="approved 必须是布尔值")
+        summary = cls._write_summary(name, ticket_id, args)
+        return ToolResult(
+            call_id, True,
+            data={"state": "CONFIRM_REQUIRED", "action": name,
+                  "ticket_id": ticket_id, "summary": summary},
+            message=summary,
+        )
+
+    @staticmethod
+    def _write_summary(name: str, ticket_id: str, args: dict) -> str:
+        text = lambda key, limit=40: str(args.get(key) or "").strip()[:limit]
+        if name == "ticket_assign":
+            return f"将工单 {ticket_id} 派给用户 {text('assignee_id')}（确认后执行）"
+        if name == "ticket_accept":
+            return f"接收工单 {ticket_id}（确认后执行）"
+        if name == "ticket_resolve":
+            return f"提交解决工单 {ticket_id}：{text('service_item_text')}（确认后执行）"
+        if name == "ticket_verify":
+            result = "通过" if args.get("approved") else "不通过"
+            return f"验证工单 {ticket_id}：{result}（确认后执行）"
+        if name == "ticket_close":
+            return f"关闭工单 {ticket_id}（确认后执行）"
+        if name == "ticket_cancel":
+            return f"取消工单 {ticket_id}：{text('cancel_reason')}（确认后执行）"
+        if name == "ticket_hold":
+            return f"挂起工单 {ticket_id}：{text('reason')}（确认后执行）"
+        if name == "ticket_resume":
+            return f"恢复工单 {ticket_id}（确认后执行）"
+        if name == "ticket_finish":
+            return f"结束工单 {ticket_id}（确认后执行）"
+        if name == "ticket_comment_add":
+            return f"给工单 {ticket_id} 添加评论：{text('content', 30)}（确认后执行）"
+        if name == "ticket_material_add":
+            return f"给工单 {ticket_id} 登记材料：{text('material_name')}（确认后执行）"
+        if name == "ticket_visit_add":
+            return f"登记工单 {ticket_id} 回访（确认后执行）"
+        return f"执行 {name}（确认后执行）"
+
     @staticmethod
     def summarize(name: str, args: dict) -> str:
+        if name in WRITE_TOOLS:
+            return ToolExecutorImpl._write_summary(
+                name, str(args.get("ticket_id") or "?"), args)[:80]
         if name == "ticket_query":
-            return f"状态={args.get('status') or '全部'}，关键词={args.get('keyword') or '无'}，" \
-                   f"条数={args.get('limit') or 5}"
+            parts = [f"状态={args.get('status') or '全部'}",
+                     f"关键词={args.get('keyword') or '无'}"]
+            if args.get("priority_code"):
+                parts.append(f"优先级={args['priority_code']}")
+            if args.get("assignee_id"):
+                parts.append(f"处理人={args['assignee_id']}")
+            if args.get("start_time") or args.get("end_time"):
+                parts.append(f"时间={args.get('start_time') or '?'}~{args.get('end_time') or '?'}")
+            if args.get("open_only"):
+                parts.append("仅未完结")
+            parts.append(f"条数={args.get('limit') or 5}")
+            return "，".join(parts)
         if name == "ticket_export":
             return f"导出范围={args.get('start_time') or '?'} ~ {args.get('end_time') or '?'}"
+        if name == "user_lookup":
+            return f"人员={str(args.get('keyword') or '')[:40]}"
         if name == "ticket_detail":
             return f"工单={args.get('ticket_id') or '未指定'}"
         if name == "ticket_similar":
@@ -309,3 +476,9 @@ class ToolExecutorImpl:
         except (TypeError, ValueError):
             return default
         return min(max(number, minimum), maximum)
+
+    @staticmethod
+    def _bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"true", "1", "yes", "y"}

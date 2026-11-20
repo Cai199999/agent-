@@ -53,8 +53,15 @@ public class InternalTicketController {
             @RequestAttribute("internalActorRoles") List<String> roles,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) Long assigneeId,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(defaultValue = "false") boolean openOnly,
             @RequestParam(defaultValue = "5") int limit) {
-        return ApiResponse.ok(ticketService.listInternal(actorId, roles, status, keyword, limit));
+        return ApiResponse.ok(ticketService.listInternal(actorId, roles, status, keyword,
+                priority, assigneeId, parseDbLocalTime(startTime), parseDbLocalTime(endTime),
+                openOnly, limit));
     }
 
     @GetMapping("/{ref}")

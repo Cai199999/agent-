@@ -16,6 +16,7 @@ public enum ErrorCode {
     TICKET_STATE_CONFLICT(20002, "工单状态冲突"),
     TICKET_ASSIGN_CONFLICT(20003, "派单/抢单冲突"),
     TICKET_IDEMPOTENCY_CONFLICT(20004, "幂等键请求体不一致"),
+    AGENT_TASK_DEADLINE_EXCEEDED(20005, "任务已超过截止时间"),
     AI_UNAVAILABLE(30001, "AI 服务不可用"),
     AI_LLM_TIMEOUT(30002, "模型超时"),
     AI_TOOL_FAILED(30003, "工具调用失败"),
